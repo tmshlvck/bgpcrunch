@@ -1,4 +1,10 @@
 bgpcrunch
 =========
 
-BGP cuncher &amp; stats generator
+BGP cuncher & stats generator
+
+Dependencies:
+
+ * Python (2.7)
+ * gnuplot
+

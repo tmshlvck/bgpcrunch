@@ -19,6 +19,7 @@
 
 import sys
 import re
+import os
 
 
 # Constants
@@ -114,7 +115,7 @@ def enumerate_available_times(ipv6):
             # change in 'dirnames' will stop os.walk() from recursing into there.
             if '.git' in dirnames:
                 dirnames.remove('.git')
-                continue
+#                continue
 
             for filename in filenames:
                 meta=parse_bgp_filename(filename)
@@ -170,8 +171,15 @@ def cleanup_path(path):
     os.system(BIN_RM+' -rf '+path)
 
 
-def get_result_dir(time):
-    rd=RESULT_DIR+'/'+str(time[0])+'-'+str(time[1])+'-'+str(time[2])
+def time_to_str(time):
+    return str(time[0])+'-'+str(time[1])+'-'+str(time[2])
+
+
+def get_result_dir(time=None):
+    rd=RESULT_DIR
+    
+    if time:
+        rd+='/'+time_to_str(time)
 
     if not (os.path.exists(rd) and os.path.isdir(rd)):
         os.mkdir(rd)
@@ -193,3 +201,51 @@ def get_text_fh(filename):
         return ungz(filename)
     else:
         return open(filename,'r')
+
+
+def process_date_plot(date):
+        return str(date)
+    
+def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y'):
+    HEADER='''
+set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,500;
+set output "''' + filepfx + '''.png"
+
+
+set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
+set xlabel "'''+ xlabel +''''"
+set ylabel "''' + ylabel + '''"
+set xdata time
+set timefmt "%Y-%m-%d"
+
+plot "-" using 1:2 with linespoints ls 1 title "''' + title + '''"
+'''
+    
+    with open(filepfx+'.gnu','w') as f:
+        f.write(HEADER)
+        for d in data:
+            f.write(process_date_plot(d[0])+' '+str(d[1])+"\n")
+
+
+def gen_3dplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',zlabel='z'):
+    HEADER='''
+set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,500;
+set output "''' + filepfx + '''.png"
+
+
+set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
+set dgrid3d 30,30
+set hidden3d
+set xlabel "''' + xlabel + '''"
+set ylabel "'''+ ylabel +''''"
+set zlabel "''' + zlabel + '''"
+set xdata time
+set timefmt "%Y-%m-%d"
+
+splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"
+'''
+    
+    with open(filepfx+'.gnu','w') as f:
+        f.write(HEADER)
+        for d in data:
+            f.write(process_date_plot(d[0])+' '+str(d[1])+' '+str(d[2])+"\n")

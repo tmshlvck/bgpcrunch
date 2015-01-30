@@ -26,25 +26,98 @@ import common
   
 import parse_paths
 def generate_histogram(infile,outfile,ipv6):
-        ifn=get_text_fh(infile)
-        hist=parse_paths.get_pfx_histogram_lines(ifn.readlines(),ipv6)
+        b=parse_paths.get_buckets_from_file(infile,ipv6,True)
+        
         with open(outfile,'w') as of:
-            of.write(str(parse_paths.get_pfx_histogram(hist)))
+                for l in parse_paths.format_buckets(b):
+                        of.write(l+"\n")
+
+        return b
+
+
+def create_histograms():
+        def avg_pathlen(bucket):
+                if len(bucket)>0:
+                        return sum(bucket)/float(len(bucket))
+                else:
+                        return 0
+
+        def gengraphs(buckets,ipv6=True):
+                rng=32
+                if ipv6:
+                        rng=128
+
+                pfxlen = []
+                for i in range(0,rng+1):
+                        pfxlen.append([])
+                        
+                avg = []
+                d3d = []
+
+                filenamepfx=common.get_result_dir()
+                if ipv6:
+                        filenamepfx=filenamepfx+'/histogram6-'
+                else:
+                        filenamepfx=filenamepfx+'/histogram4-'
+
+                times=sorted(buckets.keys())
+                for t in times:
+                        ts=common.time_to_str(t)
+                        avgt=0
+                        nonzerocnt=0
+                        for i in range(0,rng+1):
+                                a=avg_pathlen(buckets[t][i])
+                                d3d.append((ts,i,a))
+                                pfxlen[i].append((ts,a))
+                                avgt+=a
+                                if a>0:
+                                        nonzerocnt+=1
+                        if nonzerocnt > 0:
+                                avg.append((ts,avgt/float(nonzerocnt)))
+
+                common.gen_lineplot(avg,filenamepfx+'avg')
+
+                for i in range(0,rng+1):
+                        common.gen_lineplot(pfxlen[i],filenamepfx+str(i))
+
+                common.gen_3dplot(d3d,filenamepfx+'3d')
+
+
+
+        buckets4={}
+        buckets6={}
+
+        # IPv4
+        for t in common.enumerate_available_times(False):
+                bgpfile=common.get_bgp_file(t,False)
+                resultdir=common.get_result_dir(t)
+
+                print "IPv4 Processing time "+str(t)+"..."
+                print "BGP file: "+str(bgpfile)
+                print "Result dir: "+str(resultdir)
+
+                buckets4[t]=generate_histogram(bgpfile,resultdir+'/histogram4.txt',False)
+        gengraphs(buckets4,False)
+
+        # IPv6
+        for t in common.enumerate_available_times(True):
+                bgpfile=common.get_bgp_file(t,True)
+                resultdir=common.get_result_dir(t)
+
+                print "IPv6 Processing time "+str(t)+"..."
+                print "BGP file: "+str(bgpfile)
+                print "Result dir: "+str(resultdir)
+
+                buckets6[t]=generate_histogram(bgpfile,resultdir+'/histogram6.txt',True)
+        gengraphs(buckets6,True)
 
 
 def main():
-    # IPv4
-    for t in common.enumerate_available_times(False):
-        bgpfile=common.get_bgp_file(t,False)
-        resultdir=common.get_result_dir(t)
+        create_histograms()
+        
+#                print get_ripe_file(t)
 
-        print "Processing time "+str(t)+"..."
-        print "BGP file: "+str(bgpfile)
-        print "Result dir: "+str(resultdir)
 
-        generate_histogram(bgpfile,resultdir+'/histogram.txt',False)
-
-#        print get_ripe_file(t)
 
 
 if __name__ == '__main__':
