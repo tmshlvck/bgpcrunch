@@ -17,36 +17,15 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
  
 
-import sys
 import re
+import sys
+import os
+import cPickle as pickle
 
 import common
 
-def format_buckets(buckets):
-    """
-    Returns textual representation of buckets.
-    buckets - list of ints.
-    Returns list of lines.
-    """
-    
-    tpfx=0
-    yield "Avg path length by prefixlength:"
-    for (i,b) in enumerate(buckets):
-        pc=len(b)
-        tpfx+=pc
 
-        pl=0
-        for l in b:
-            pl+=l
-        if pc == 0:
-            yield "/"+str(i)+" : N/A (0 prefixes)"
-        else:
-            yield "/"+str(i)+" : "+str(float(pl)/pc)+" ("+str(pc)+" prefixes)"
-
-    yield "Total prefixes examined: "+str(tpfx)
-
-
-def parse_cisco_bgp(filename=None):
+def parse_cisco_bgp_file(filename=None):
     """
     Read Cisco show ip bgp output captured in a file (specified by
     the filename) and returns tuples (indicator,pfx,nexthop,aspath).
@@ -105,78 +84,21 @@ def parse_cisco_bgp(filename=None):
                 indicator=None
 
 
+def parse_cisco_bgp(infile,outfile):
+    o=None
+    if os.path.isfile(outfile):
+        if not os.path.isfile(infile):
+            common.warn("No infile for outfile "+outfile)
 
-
-def get_buckets_from_file(filename,ipv6=False,bestonly=False):
-    """
-    Reads Cisco show ip bgp output captured in a file and returns
-    list of lists of path length where:
-    r=get_buckets_from_file(...)
-    r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
-    prefixes with netmask /16. One with AS-path length x, another y, ...
-
-    filename - string
-    ipv6 - bool (=expect /128 masks)
-    bestonly - ignore received but not used routes
-    """
-    
-    buckets=[]
-    rng=32
-    if ipv6:
-        rng=128
-
-    for i in range(0,rng+1):
-        buckets.append([])
-
-    for r in parse_cisco_bgp(filename):
-        if bestonly and not (r[0] and '>' in r[0]):
-            continue
+        common.debug("Loading pickle file "+outfile)
+        with open(outfile, 'rb') as input:
+            o = pickle.load(input)
+        return o
         
-        nm = common.get_pfxlen(r[1])
-        try:
-            buckets[nm].append(common.get_bgp_pathlen(r[3]))
-        except:
-            print "EXC: nm="+str(nm)+" r[6]="+str(r)
 
-    return buckets
+    o=list(parse_cisco_bgp_file(infile))
+    common.debug("Saving pickle file "+outfile)
+    with open(outfile, 'wb') as output:
+        pickle.dump(o, output, pickle.HIGHEST_PROTOCOL)
 
-
-
-import getopt,sys
-def main():
-    def usage():
-        print """analyze_bgp.py [-6] [-f filename] -- generate histogram from a captured
-Cisco show ip bgp or show ipv6 bgp
-  -6 : expect show ipv6 bgp instead of show ip bgp capture
-  -f filename : analyze filename instead of stdin
-"""
-    
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], 'h6f:')
-    except getopt.GetoptError as err:
-        print str(err)
-        usage()
-        sys.exit(2)
-    
-    ipv6=False
-    filename=None
-    for o,a in opts:
-        if o == '-6':
-            ipv6=True
-        elif o == '-f':
-            filename = a
-        elif o == 'h':
-            usage()
-            sys.exit(0)
-        else:
-            usage()
-            sys.exit(2)
-
-
-    b=get_buckets_from_file(filename,ipv6,True)
-    for l in format_buckets(b):
-        print l
-
-
-if __name__ == "__main__":
-    main()
+    return o

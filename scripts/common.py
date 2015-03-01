@@ -24,7 +24,7 @@ import os
 
 # Constants
 
-DEBUG=False
+DEBUG=True
 
 ROOT_DIR='/home/brill/projects/bgpcrunch'
 DATA_DIR=ROOT_DIR+'/data'
@@ -52,6 +52,9 @@ BIN_TAR='/bin/tar'
 def debug(m):
     if DEBUG:
         sys.stderr.write(m+"\n")
+
+def warn(m):
+    sys.stderr.write(m+"\n")
 
 
 PREFIX_REGEXP=re.compile("[0-9a-fA-F:\.]+/([0-9]{1,3})")
@@ -172,7 +175,7 @@ def cleanup_path(path):
 
 
 def time_to_str(time):
-    return str(time[0])+'-'+str(time[1])+'-'+str(time[2])
+    return ("%04d" % time[0])+'-'+("%02d" % time[1])+'-'+("%02d" % time[2])
 
 
 def get_result_dir(time=None):
@@ -203,38 +206,55 @@ def get_text_fh(filename):
         return open(filename,'r')
 
 
-def process_date_plot(date):
-        return str(date)
+def gen_2dplot(header,data,filepfx,outputfn=None):
+    if len(data)==0:
+        raise Exception("Can not generate empty plot! Gnuplot will fail subsequently.")
     
-def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y'):
+    if not outputfn:
+        outputfn=filepfx.split('/')[-1]
+
+    with open(filepfx+'.gnu','w') as f:
+        f.write(header)
+        for d in data:
+            f.write(str(d[0])+' '+str(d[1])+"\n")
+
+
+def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',xrange=None,yrange=None,outputfn=None):
     HEADER='''
-set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,500;
-set output "''' + filepfx + '''.png"
+set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,600;
+set output "''' + filepfx.split('/')[-1] + '''.png"
 
 
 set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
 set xlabel "'''+ xlabel +''''"
 set ylabel "''' + ylabel + '''"
+''' + ('set xrange ['+str(xrange[0])+','+str(xrange[1])+']' if xrange else '')+'''
+'''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
 set xdata time
 set timefmt "%Y-%m-%d"
 
-plot "-" using 1:2 with linespoints ls 1 title "''' + title + '''"
+plot "-" using 1:2 with lines ls 1 title "''' + title + '''"
 '''
+    return gen_2dplot(HEADER,data,filepfx,outputfn)
+
+
+def gen_3dplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',zlabel='z',outputfn=None):
+    if len(data)==0 or len(data[0])!=3:
+        raise Exception("Can not generate empty plot! Gnuplot will fail subsequently.")
     
-    with open(filepfx+'.gnu','w') as f:
-        f.write(HEADER)
-        for d in data:
-            f.write(process_date_plot(d[0])+' '+str(d[1])+"\n")
+    dsgridx='30'
+    dsgridy='30'
 
-
-def gen_3dplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',zlabel='z'):
+    if not outputfn:
+        outputfn=filepfx.split('/')[-1]
+    
     HEADER='''
-set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,500;
-set output "''' + filepfx + '''.png"
+set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,600;
+set output "''' + outputfn + '''.png"
 
 
 set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
-set dgrid3d 30,30
+set dgrid3d '''+dsgridx+','+dsgridy+'''
 set hidden3d
 set xlabel "''' + xlabel + '''"
 set ylabel "'''+ ylabel +''''"
@@ -247,5 +267,9 @@ splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"
     
     with open(filepfx+'.gnu','w') as f:
         f.write(HEADER)
+        lastdate=data[0][0]
         for d in data:
-            f.write(process_date_plot(d[0])+' '+str(d[1])+' '+str(d[2])+"\n")
+            if not lastdate==d[0]:
+                f.write("\n")
+                lastdate=d[0]
+            f.write(str(d[0])+' '+str(d[1])+' '+str(d[2])+"\n")
