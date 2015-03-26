@@ -20,6 +20,7 @@
 import sys
 import re
 import os
+import tempfile
 
 
 # Constants
@@ -36,6 +37,7 @@ RIPE_DATA=DATA_DIR+'/ripe'
 TMPDIR_PREFIX='bgpcrunch'
 
 BIN_TAR='/bin/tar'
+BIN_RM='/bin/rm'
 
 
 
@@ -111,6 +113,23 @@ def parse_bgp_filename(filename):
     return (ipv6,int(g[2]),int(g[3]),int(g[4]),int(g[5]),int(g[6]),int(g[7]))
 
 
+def parse_ripe_filename(filename):
+    # Input filename='ripedb-2014-2-16-1-17-2.txt.bz2'
+    # Output (ipv6,year,month,day,hour,min,sec)
+
+    ipv6=False
+
+    g=filename.split('-')
+    if g[0] != 'ripedb':
+        raise Exception('Can not parse filename: '+filename)
+
+    g[6]=g[6].split('.',1)[0]
+
+    return (int(g[1]),int(g[2]),int(g[3]),int(g[4]),int(g[5]),int(g[6]))
+
+
+
+
 def enumerate_available_times(ipv6):
     times=[]
     for host in BGP_HOSTS:
@@ -156,21 +175,21 @@ def get_ripe_file(time):
             continue
 
         for filename in filenames:
-            meta=parse_bgp_filename(filename)
-            if is_same_day(time,meta[1:]):
-                return filename
+            meta=parse_ripe_filename(filename)
+            if is_same_day(time,meta):
+                return dirname+'/'+filename
 
 
 def unpack_ripe_file(filename):
     dir=tempfile.mkdtemp(prefix=TMPDIR_PREFIX)
-    d('mktempdir: '+dir)
-    d(BIN_TAR+' jxf '+filename+' -C '+dir)
+    debug('mktempdir: '+dir)
+    debug(BIN_TAR+' jxf '+filename+' -C '+dir)
     os.system(BIN_TAR+' jxf '+filename+' -C '+dir)
     return dir
 
 
 def cleanup_path(path):
-    d('Cleaning up path '+path)
+    debug('Cleaning up path '+path)
     os.system(BIN_RM+' -rf '+path)
 
 
