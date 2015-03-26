@@ -29,6 +29,11 @@ def create_path_matrix(ipv6=False):
 
         for t in common.enumerate_available_times(ipv6):
                 bgpfile=common.get_bgp_file(t,ipv6)
+
+                if not bgpfile:
+                        common.debug("Skipping BGP parse for time "+str(t)+". No BGP snapshot available.")
+                        continue
+
                 resultdir=common.get_result_dir(t)
                 outfile=resultdir+'/bgpdump'+('6' if ipv6 else '4')+'.pkl'
 
@@ -48,16 +53,33 @@ def create_path_matrix(ipv6=False):
         return bucket_matrix
 
 
+def create_ripe_objectdb_stats():
+        for t in list(set(common.enumerate_available_times(False)) |
+                      set(common.enumerate_available_times(True))):
+                ripefile = common.get_ripe_file(t)
+                if not ripefile:
+                        common.debug("Skipping RPSL parse for time "+str(t)+". No DB snapshot available.")
+                        continue
+                
+                common.debug("Processing time "+str(t)+"...")
+                common.debug("RIPE file: "+str(ripefile))
+
+                outdir=common.unpack_ripe_file(ripefile)
+                common.debug("RIPE unpack result: "+outdir)
+#                common.cleanup_path(outdir)
+
+
 def main():
-        m4=create_path_matrix(ipv6=False)
-        bgp.gen_pathlen_timegraphs(m4,ipv6=False)
-        bgp.gen_prefixcount_timegraph(m4,ipv6=False)
+#        m4=create_path_matrix(ipv6=False)
+#        bgp.gen_pathlen_timegraphs(m4,ipv6=False)
+#        bgp.gen_prefixcount_timegraph(m4,ipv6=False)
         
-        m6=create_path_matrix(ipv6=True)
-        bgp.gen_pathlen_timegraphs(m6,ipv6=True)
-        bgp.gen_prefixcount_timegraph(m6,ipv6=True)
+#        m6=create_path_matrix(ipv6=True)
+#        bgp.gen_pathlen_timegraphs(m6,ipv6=True)
+#        bgp.gen_prefixcount_timegraph(m6,ipv6=True)
 
 
+        rdb=create_ripe_objectdb_stats()
 
 
 if __name__ == '__main__':
