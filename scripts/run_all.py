@@ -21,36 +21,11 @@
 import common  
 import bgp
 import cisco
+import ianaspace
 
 
 
-def create_path_matrix(ipv6=False):
-        bucket_matrix={}
 
-        for t in common.enumerate_available_times(ipv6):
-                bgpfile=common.get_bgp_file(t,ipv6)
-
-                if not bgpfile:
-                        common.debug("Skipping BGP parse for time "+str(t)+". No BGP snapshot available.")
-                        continue
-
-                resultdir=common.get_result_dir(t)
-                outfile=resultdir+'/bgpdump'+('6' if ipv6 else '4')+'.pkl'
-
-                common.debug("Processing time "+str(t)+"...")
-                common.debug("BGP file: "+str(bgpfile))
-                common.debug("Result dir: "+str(resultdir))
-                common.debug("Output file: "+str(outfile))
-
-                bgpdump=cisco.parse_cisco_bgp(bgpfile,outfile)
-                bucket_matrix[t]=bgp.gen_buckets(bgpdump,ipv6,bestonly=True)
-                
-                outfile=resultdir+'/pathlen'+('6' if ipv6 else '4')+'.txt'
-                bgp.generate_pathlen_text(bucket_matrix[t],outfile,ipv6)
-                outfilepfx=resultdir+'/pathlen'+('6' if ipv6 else '4')
-                bgp.generate_pathlen_graph(bucket_matrix[t],outfilepfx,ipv6)
-
-        return bucket_matrix
 
 
 def create_ripe_objectdb_stats():
@@ -68,18 +43,15 @@ def create_ripe_objectdb_stats():
                 common.debug("RIPE unpack result: "+outdir)
 #                common.cleanup_path(outdir)
 
-
+import gc
 def main():
-#        m4=create_path_matrix(ipv6=False)
-#        bgp.gen_pathlen_timegraphs(m4,ipv6=False)
-#        bgp.gen_prefixcount_timegraph(m4,ipv6=False)
-        
-#        m6=create_path_matrix(ipv6=True)
-#        bgp.gen_pathlen_timegraphs(m6,ipv6=True)
-#        bgp.gen_prefixcount_timegraph(m6,ipv6=True)
+#        bgp.create_bgp_stats(ipv6=False)
+#        bgp.create_bgp_stats(ipv6=True)
+
+        ianaspace.create_rir_pfx_stats(ipv6=False)
 
 
-        rdb=create_ripe_objectdb_stats()
+#        rdb=create_ripe_objectdb_stats()
 
 
 if __name__ == '__main__':

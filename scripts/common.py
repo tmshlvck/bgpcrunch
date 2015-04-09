@@ -21,6 +21,9 @@ import sys
 import re
 import os
 import tempfile
+import operator
+
+import ipaddr
 
 
 # Constants
@@ -131,6 +134,7 @@ def parse_ripe_filename(filename):
 
 
 def enumerate_available_times(ipv6):
+    """ Returns sorted list of times. Time is tuple (year,month,day,hour,min,sec). """
     times=[]
     for host in BGP_HOSTS:
         for dirname, dirnames, filenames in os.walk(BGP_DATA[host]):
@@ -143,7 +147,7 @@ def enumerate_available_times(ipv6):
                 meta=parse_bgp_filename(filename)
                 if meta[0] == ipv6:
                     times.append(meta[1:])
-    return times
+    return sorted(times,key=operator.itemgetter(0,1,2,3,4,5))
                         
 
 def is_same_day(time1,time2):
@@ -234,8 +238,11 @@ def gen_2dplot(header,data,filepfx,outputfn=None):
 
     with open(filepfx+'.gnu','w') as f:
         f.write(header)
-        for d in data:
-            f.write(str(d[0])+' '+str(d[1])+"\n")
+        for dl in data:
+            l=''
+            for d in dl:
+                l+=str(d)+' '
+            f.write(l+"\n")
 
 
 def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',xrange=None,yrange=None,outputfn=None):
@@ -256,6 +263,37 @@ plot "-" using 1:2 with lines ls 1 title "''' + title + '''"
 '''
     return gen_2dplot(HEADER,data,filepfx,outputfn)
 
+
+def gen_multilineplot(data,filepfx,xlabel='Date',ylabel='y',legend=[],xrange=None,yrange=None,outputfn=None):
+    HEADER='''
+set term pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,600;
+set output "''' + filepfx.split('/')[-1] + '''.png"
+
+
+#set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
+set xlabel "'''+ xlabel +''''"
+set ylabel "''' + ylabel + '''"
+''' + ('set xrange ['+str(xrange[0])+','+str(xrange[1])+']' if xrange else '')+'''
+'''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
+set xdata time
+set timefmt "%Y-%m-%d"
+
+plot "-"'''
+
+    for (i,d) in enumerate(data[0]):
+        if i==0:
+            continue
+
+        l = legend[i] if len(legend)>i else 'y'+str(i)
+        HEADER+='using 1:'+str(i+1)+' with lines title "' + l +'"'
+        if i<len(data[0])-1:
+            HEADER+=', '
+        else:
+            HEADER+="\n"
+
+    return gen_2dplot(HEADER,data,filepfx,outputfn)
+
+    
 
 def gen_3dplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',zlabel='z',outputfn=None):
     if len(data)==0 or len(data[0])!=3:
@@ -292,3 +330,68 @@ splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"
                 f.write("\n")
                 lastdate=d[0]
             f.write(str(d[0])+' '+str(d[1])+' '+str(d[2])+"\n")
+
+
+
+# Exported classes
+
+
+class IPLookupTree(object):
+    class IPLookupTreeNode:
+        def __init__(self):
+            self.one=None
+            self.zero=None
+            self.end=None
+            self.data=None
+
+    
+    def __init__(self,ipv6=False):
+        self.ipv6=ipv6
+        self.root=IPLookupTree.IPLookupTreeNode()
+
+    def _bits(self,chararray):
+        for c in chararray:
+            ct=ord(c)
+            for i in range(7,-1,-1):
+                if ct & (1 << i):
+                    yield True
+                else:
+                    yield False
+
+    def add(self,net,data):
+        if not (isinstance(net, ipaddr.IPv4Network) or isinstance(net, ipaddr.IPv6Network)):
+            net = ipaddr.IPNetwork(net)
+
+        bits = list(self._bits(net.packed))
+        index=self.root
+        for bi in range(0,net.prefixlen):
+            if bits[bi]:
+                if not index.one:
+                    index.one = self.IPLookupTreeNode()
+                index = index.one
+            else:
+                if not index.zero:
+                    index.zero = self.IPLookupTreeNode()
+                index = index.zero
+        index.end = net
+        index.data = data
+
+    def lookupFirst(self,ip):
+        limit=128 if self.ipv6 else 32
+        if isinstance(ip, ipaddr.IPv4Network) or isinstance(ip, ipaddr.IPv6Network):
+            limit=ip.prefixlen
+
+        index = self.root
+        for (bi,b) in enumerate(self._bits(ip.packed)):
+            if bi > limit:
+                return None
+
+            if index.end and ip in index.end: # match
+                return index.data
+
+            if b:
+                index = index.one
+            else:
+                index = index.zero
+
+        return None

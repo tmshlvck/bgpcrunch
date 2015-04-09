@@ -84,7 +84,11 @@ def parse_cisco_bgp_file(filename=None):
                 indicator=None
 
 
-def parse_cisco_bgp(infile,outfile):
+def parse_cisco_bgp_time(t,ipv6=False):
+    infile=common.get_bgp_file(t,ipv6)
+    resultdir=common.get_result_dir(t)
+    outfile=resultdir+'/bgpdump'+('6' if ipv6 else '4')+'.pkl'
+    
     o=None
     if os.path.isfile(outfile):
         if not os.path.isfile(infile):

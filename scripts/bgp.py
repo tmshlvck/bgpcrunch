@@ -29,7 +29,7 @@ def gen_buckets(bgpdump,ipv6=False,bestonly=False):
     """
     Reads Cisco show ip bgp output captured in a file and returns
     list of lists of path length where:
-    r=get_buckets_from_file(...)
+    r=gen_buckets(...)
     r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
 
@@ -190,6 +190,45 @@ def gen_prefixcount_timegraph(bucket_matrix,ipv6=False):
             common.gen_lineplot(counts[i],filenamepfx+str(i))
 
 
+
+
+def create_path_matrix(ipv6=False):
+    """ Generate matrix: [t:buckets,...] where buckets (r) contains
+    r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
+    prefixes with netmask /16. One with AS-path length x, another y, ...
+    """
+    bucket_matrix={}
+
+    for t in common.enumerate_available_times(ipv6):
+        if not bgpfile:
+            common.debug("Skipping BGP parse for time "+str(t)+". No BGP snapshot available.")
+            continue
+
+        common.debug("Processing time "+str(t)+"...")
+        common.debug("BGP file: "+str(bgpfile))
+
+        bgpdump=cisco.parse_cisco_bgp_time(t,ipv6)
+        bucket_matrix[t]=bgp.gen_buckets(bgpdump,ipv6,bestonly=True)
+
+    return bucket_matrix
+
+
+
+def create_bgp_stats(ipv6=False):
+    """ Main function to be called from run_all. Returns nothing but generates a lot of result files. """
+    m=create_path_matrix(ipv6)
+    gen_pathlen_timegraphs(m,ipv6)
+    gen_prefixcount_timegraph(m,ipv6)
+
+    resultdir=common.get_result_dir(t)
+    for t in common.enumerate_available_times(ipv6):
+        outfile=resultdir+'/pathlen'+('6' if ipv6 else '4')+'.txt'
+        generate_pathlen_text(m[t],outfile,ipv6)
+        outfilepfx=resultdir+'/pathlen'+('6' if ipv6 else '4')
+        generate_pathlen_graph(m[t],outfilepfx,ipv6)
+        
+
+            
 
 #################################
 
