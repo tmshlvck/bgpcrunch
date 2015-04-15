@@ -238,11 +238,13 @@ def gen_2dplot(header,data,filepfx,outputfn=None):
 
     with open(filepfx+'.gnu','w') as f:
         f.write(header)
-        for dl in data:
-            l=''
-            for d in dl:
-                l+=str(d)+' '
-            f.write(l+"\n")
+        # nasty hack for naughty gnuplot
+        for (dci,notused) in enumerate(data[0]): # dri = data column index
+            if dci == 0:
+                continue
+            for dl in data:
+                f.write(str(dl[0])+' '+str(dl[dci])+"\n")
+            f.write("e\n")
 
 
 def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',xrange=None,yrange=None,outputfn=None):
@@ -278,14 +280,14 @@ set ylabel "''' + ylabel + '''"
 set xdata time
 set timefmt "%Y-%m-%d"
 
-plot "-"'''
+plot'''
 
     for (i,d) in enumerate(data[0]):
         if i==0:
             continue
 
         l = legend[i] if len(legend)>i else 'y'+str(i)
-        HEADER+='using 1:'+str(i+1)+' with lines title "' + l +'"'
+        HEADER+=('"-"' if i==1 else '""')+' using 1:2 with lines title "' + l +'"'
         if i<len(data[0])-1:
             HEADER+=', '
         else:

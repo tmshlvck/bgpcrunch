@@ -22,6 +22,7 @@ import ipaddr
 import itertools
 
 import common
+import cisco
 
 iana_ipv4_list='/home/brill/projects/bgpcrunch/data/ipv4-address-space.csv'
 iana_ipv6_list='/home/brill/projects/bgpcrunch/data/ipv6-unicast-address-assignments.csv'
@@ -127,14 +128,14 @@ class IanaDirectory(object):
 
 
 def create_rir_pfx_stats(ipv6=False,bestonly=True):
-        iana = ianaspace.IanaDirectory(ipv6)
+        iana = IanaDirectory(ipv6)
         timeline=[]
 
         for t in common.enumerate_available_times(ipv6):
-                outtxt = common.get_result_dir(t)+'rirstats'+'6' if ipv6 else '4'+'.txt'
+                outtxt = common.get_result_dir(t)+'/rirstats'+('6' if ipv6 else '4')+'.txt'
                 rirpfxlens={}
                 bgpdump=cisco.parse_cisco_bgp_time(t,ipv6)
-                for (i,pv) in enumerate(bgpdump):
+                for pv in bgpdump:
                         if bestonly and not (pv[0] and '>' in pv[0]):
                                 continue
 
@@ -145,16 +146,16 @@ def create_rir_pfx_stats(ipv6=False,bestonly=True):
                         if not name in rirpfxlens:
                                 rirpfxlens[name]=[]
                         rirpfxlens[name].append(r[0].prefixlen)
-                        timeline.append(itertools.flatten([t,[rirpfxlens[n] for n in RIRS]]))
+                timeline.append([common.time_to_str(t)]+[len(rirpfxlens[n]) for n in RIRS])
 
                 common.debug("Generating output RIR stats text "+outtxt)
                 with open(outtxt,'w') as f:
                         for k in RIRS:
                                 f.write(str(k)+": "+str(len(rirpfxlens[k]))+"\n")
 
-        outgraph = common.get_result_dir()+'rirstats'+'6' if ipv6 else '4'
+        outgraph = common.get_result_dir()+'/rirstats'+('6' if ipv6 else '4')
         common.debug("Generating output RIR stats graph with prefix "+outgraph)
-        gen_multilineplot(timeline,outgraph,legend=RIRS)
+        common.gen_multilineplot(timeline,outgraph,legend=RIRS)
         
 
 
