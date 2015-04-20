@@ -22,7 +22,7 @@ import sys
 
 import common
 import ianaspace
-import bgp
+import cisco
 
 class RpslObject(object):
     def __init__(self,textlines):
@@ -82,7 +82,7 @@ class AutNumObject(RpslObject):
         pass
 
 # HACK HACK HACK TODO normalize + tree + remove duplication
-def getroute(prefix,routeobjects):
+def getroute(routeobjects,prefix):
     def normalize_addr(addr):
         s=addr.split('.')
         r=''
@@ -122,36 +122,46 @@ def getroute(prefix,routeobjects):
 
         return str(a)+'/'+str(m)
 
-    
+    res=[]
     for o in routeobjects:
-        if normalize_ipv4_prefix(prefix) == str(o.route):
-            return o
+        if str(normalize_ipv4_prefix(prefix)) == str(o.route):
+            res.append(o)
+    return res
 
 # TODO: replace getroute with tree, support IPv6
-def check_ripe_routes(time,rpsldir,ipv6=False):
+def check_ripe_routes(time,rpsldir,ipv6=False,bestonly=True):
+    idir = ianaspace.IanaDirectory(ipv6)
     riperoutes=None
     if ipv6:
         raise Exception("IPv6 not supported yet")
     else:
-        riperoutes=parse_route_objects(rpsldir+"/ripe.db.route")
+        riperoutes=list(parse_route_objects(rpsldir+"/ripe.db.route"))
 
     bgpdump=cisco.parse_cisco_bgp_time(time,ipv6)
     for pv in bgpdump:
         if bestonly and not (pv[0] and '>' in pv[0]):
             continue
 
-        r=iana.resolve_network(pv[1])
-        if r[1] == 'RIPE NCC':
-            route=getroute(riperoutes,pv[1])
-            if route:
-                if route.origin == "AS"+pv[2]:
-                    print "Route object match "+str(route.route)+"->("+str(route.origin)+") found for "+str(pv[1])
-                else:
-                    print "Route object NOT match "+str(route.route)+"->("+str(route.origin)+") found for "+str(pv[1])
+        if len(pv[3].split(' '))>2:
+            origin=pv[3].split(' ')[-2]
+        else:
+            continue # localy originated prefix?
+
+        iananet=idir.resolve_network(pv[1])
+        if iananet[2] == 'RIPE NCC':
+            routes=getroute(riperoutes,pv[1])
+            if routes:
+                match=False
+                for route in routes:
+                    if route.origin.upper() == "AS"+origin:
+                        print "Route object match "+str(route.route)+"->("+str(route.origin)+")"
+                        match=True
+                if not match:
+                    print "Route object NOT match "+str(route.route)+"->("+str(route.origin)+") found for "+str(pv[1])+" from AS"+str(origin)
             else:
                 print "No route object found for "+str(pv[1])
         else:
-            print "Skipping non-RIPE NCC network "+pv[1]+" which is part of "+str(r[0])+"("+str(r[1])+")"
+            print "Skipping non-RIPE NCC network "+pv[1]+" which is part of "+str(iananet[0])+" ("+str(iananet[2])+")"
     
 
 
@@ -164,17 +174,18 @@ def daily_stats(time,rpsldir,):
 def create_ripe_objectdb_stats():
         for t in list(set(common.enumerate_available_times(False)) |
                       set(common.enumerate_available_times(True))):
-                ripefile = common.get_ripe_file(t)
-                if not ripefile:
-                        common.debug("Skipping RPSL parse for time "+str(t)+". No DB snapshot available.")
-                        continue
+#                ripefile = common.get_ripe_file(t)
+#                if not ripefile:
+#                        common.debug("Skipping RPSL parse for time "+str(t)+". No DB snapshot available.")
+#                        continue
                 
-                common.debug("Processing time "+str(t)+"...")
-                common.debug("RIPE file: "+str(ripefile))
+#                common.debug("Processing time "+str(t)+"...")
+#                common.debug("RIPE file: "+str(ripefile))
 
-                rpsldir=common.unpack_ripe_file(ripefile)
-                common.debug("RIPE unpack result: "+rpsldir)
+#                rpsldir=common.unpack_ripe_file(ripefile)
+#                common.debug("RIPE unpack result: "+rpsldir)
 
+                rpsldir = "/tmp/bgpcrunch45O5jU"
                 daily_stats(t,rpsldir)
                 
 #                common.cleanup_path(rpsldir)
@@ -183,6 +194,10 @@ def create_ripe_objectdb_stats():
 
 
 def main():
+    riperoutes=parse_route_objects("/tmp/bgpcrunch45O5jU"+"/ripe.db.route")
+    getroute(riperoutes,"2.10.0.0/16")
+    return
+    
     for o in parse_route_objects(sys.argv[1]):
         print "O: "+str(o.route)+" -> "+str(o.origin)
         
