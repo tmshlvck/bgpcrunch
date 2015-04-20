@@ -22,36 +22,19 @@ import common
 import bgp
 import cisco
 import ianaspace
+import rpsl
 
 
 
 
-
-
-def create_ripe_objectdb_stats():
-        for t in list(set(common.enumerate_available_times(False)) |
-                      set(common.enumerate_available_times(True))):
-                ripefile = common.get_ripe_file(t)
-                if not ripefile:
-                        common.debug("Skipping RPSL parse for time "+str(t)+". No DB snapshot available.")
-                        continue
-                
-                common.debug("Processing time "+str(t)+"...")
-                common.debug("RIPE file: "+str(ripefile))
-
-                outdir=common.unpack_ripe_file(ripefile)
-                common.debug("RIPE unpack result: "+outdir)
-#                common.cleanup_path(outdir)
-
-import gc
 def main():
 #        bgp.create_bgp_stats(ipv6=False)
 #        bgp.create_bgp_stats(ipv6=True)
 
-        ianaspace.create_rir_pfx_stats(ipv6=False)
+#        ianaspace.create_rir_pfx_stats(ipv6=False)
 
 
-#        rdb=create_ripe_objectdb_stats()
+        rdb=rpsl.create_ripe_objectdb_stats()
 
 
 if __name__ == '__main__':
