@@ -22,7 +22,42 @@ import re
 import getopt
 
 import common
+import graph
 import cisco
+
+
+PREFIX_REGEXP=re.compile("[0-9a-fA-F:\.]+/([0-9]{1,3})")
+def get_pfxlen(pfx):
+    """
+    Resolve netmask for an IPv4 or IPv6 prefix.
+
+    When the prefix is IPv6 it has to contain explicit prefix length. I.E. 2001:1::/32 -> 32
+    When the IPv4 prefix contains explicit netmask it just returns it. I.E. 1.2.3.4/24 -> 24
+    Netmask is determined based on classful IPv4 split otherwise.
+
+    pfx: IP address as string.
+    returns: (Int) Netmask.
+    """
+    if pfx.strip() == '0.0.0.0':
+        return 0
+
+    m=PREFIX_REGEXP.match(pfx)
+    if m:
+        return int(m.group(1))
+    else:
+        f=int(pfx.split(".")[0])
+        if f <= 127:
+            return 8
+        elif f<= 191:
+            return 16
+        elif f<= 239:
+            return 24
+        else:
+            raise Exception("Multicast or reserved address hit: "+pfx)
+
+def get_bgp_pathlen(p):
+    """ Return number of ASes in ASpath. """ 
+    return (len(p.split(' '))-1)
 
 
 def gen_buckets(bgpdump,ipv6=False,bestonly=False):
@@ -50,9 +85,9 @@ def gen_buckets(bgpdump,ipv6=False,bestonly=False):
         if bestonly and not (r[0] and '>' in r[0]):
             continue
         
-        nm = common.get_pfxlen(r[1])
+        nm = get_pfxlen(r[1])
         try:
-            buckets[nm].append(common.get_bgp_pathlen(r[3]))
+            buckets[nm].append(get_bgp_pathlen(r[3]))
         except:
             print "EXC: nm="+str(nm)+" r[6]="+str(r)
 
@@ -60,6 +95,10 @@ def gen_buckets(bgpdump,ipv6=False,bestonly=False):
 
 
 def avg_pathlen(bucket):
+    """ Count avgpathlen for a bucket (=list of pathlens like
+    ["1 2 3","1 2","1 2 3 4",...]
+    """
+
     if len(bucket)>0:
         return sum(bucket)/float(len(bucket))
     else:
@@ -90,17 +129,17 @@ def format_buckets(buckets):
 
 #############################
 
-def generate_pathlen_text(buckets,outfile,ipv6):
+def gen_pathlen_textfile(buckets,outfile,ipv6):
     with open(outfile,'w') as of:
         for l in format_buckets(buckets):
             of.write(l+"\n")
 
          
-def generate_pathlen_graph(buckets,outfile,ipv6):
-    common.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],outfile)
+def gen_pathlen_graph(buckets,outfile,ipv6):
+    graph.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],outfile)
     
 
-def gen_pathlen_timegraphs(bucket_matrix,ipv6=True):
+def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
     """ Generate graphs pathlen4-<number> when number is the length of the examined
     prefix. Graph contains average length of paths with the prefix length set by number.
     It also creates 3d graph pathlen4-3d with all prefix lenght in one dimension.
@@ -117,7 +156,6 @@ def gen_pathlen_timegraphs(bucket_matrix,ipv6=True):
     avg = []
     d3d = []
 
-    filenamepfx=common.get_result_dir()
     if ipv6:
         filenamepfx=filenamepfx+'/pathlen6-'
     else:
@@ -125,7 +163,7 @@ def gen_pathlen_timegraphs(bucket_matrix,ipv6=True):
 
     times=sorted(bucket_matrix.keys())
     for t in times:
-        ts=common.time_to_str(t)
+        ts=str(t)
         avgt=0
         nonzerocnt=0
         for i in range(0,rng+1):
@@ -140,18 +178,18 @@ def gen_pathlen_timegraphs(bucket_matrix,ipv6=True):
                 avg.append((ts,avgt/float(nonzerocnt)))
 
     if avg:
-        common.gen_lineplot(avg,filenamepfx+'avg')
+        graph.gen_lineplot(avg,filenamepfx+'avg')
 
     for i in range(0,rng+1):
         if pfxlen[i]:
-            common.gen_lineplot(pfxlen[i],filenamepfx+str(i))
+            graph.gen_lineplot(pfxlen[i],filenamepfx+str(i))
 
     if d3d:
-        common.gen_3dplot(d3d,filenamepfx+'3d')
+        graph.gen_3dplot(d3d,filenamepfx+'3d')
 
 
 
-def gen_prefixcount_timegraph(bucket_matrix,ipv6=False):
+def gen_prefixcount_timegraph(bucket_matrix, filenamepfx, ipv6=False):
     """ Generate graphs pfxcount4-<number> that shows how many prefixes
     of the length <number> was in DFZ at the defined time. It also generates
     graph pfxcount-sum that shows all the prefixes regardless of prefix length.
@@ -161,7 +199,6 @@ def gen_prefixcount_timegraph(bucket_matrix,ipv6=False):
     if ipv6:
         rng=128
     
-    filenamepfx=common.get_result_dir()
     if ipv6:
         filenamepfx=filenamepfx+'/pfxcount6-'
     else:
@@ -175,7 +212,7 @@ def gen_prefixcount_timegraph(bucket_matrix,ipv6=False):
     times=sorted(bucket_matrix.keys())
     for t in times:
         s=0
-        ts=common.time_to_str(t)
+        ts=str(t)
         for i in range(0,rng+1):
             cnt=len(bucket_matrix[t][i])
             s+=cnt
@@ -183,49 +220,45 @@ def gen_prefixcount_timegraph(bucket_matrix,ipv6=False):
         sumall.append((ts,s))
 
     if sumall:
-        common.gen_lineplot(sumall,filenamepfx+'sum')
+        graph.gen_lineplot(sumall,filenamepfx+'sum')
 
     for i in range(0,rng+1):
         if counts[i]:
-            common.gen_lineplot(counts[i],filenamepfx+str(i))
+            graph.gen_lineplot(counts[i],filenamepfx+str(i))
 
 
 
 
-def create_path_matrix(ipv6=False):
+def create_path_matrix(host, days, infile_transform, ipv6=False):
     """ Generate matrix: [t:buckets,...] where buckets (r) contains
     r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
     """
     bucket_matrix={}
 
-    for t in common.enumerate_available_times(ipv6):
-        if not bgpfile:
-            common.debug("Skipping BGP parse for time "+str(t)+". No BGP snapshot available.")
-            continue
+    for t in days:
+        bgpfile=infile_transform(t, host, ipv6)
+        common.d("bgp.create_path_matrix processing time "+str(t)+"...")
 
-        common.debug("Processing time "+str(t)+"...")
-        common.debug("BGP file: "+str(bgpfile))
-
-        bgpdump=cisco.parse_cisco_bgp_time(t,ipv6)
-        bucket_matrix[t]=bgp.gen_buckets(bgpdump,ipv6,bestonly=True)
+        bgpdump=cisco.load_bgp_pickle(bgpfile)
+        bucket_matrix[t]=gen_buckets(bgpdump, ipv6, bestonly=True)
 
     return bucket_matrix
 
 
 
-def create_bgp_stats(ipv6=False):
+def module_run(host, days, infile_transform, outdir_transform, ipv6=False):
     """ Main function to be called from run_all. Returns nothing but generates a lot of result files. """
-    m=create_path_matrix(ipv6)
-    gen_pathlen_timegraphs(m,ipv6)
-    gen_prefixcount_timegraph(m,ipv6)
+    m=create_path_matrix(host, days, infile_transform, ipv6)
+    gen_pathlen_timegraphs(m, outdir_transform(), ipv6)
+    gen_prefixcount_timegraph(m, outdir_transform(), ipv6)
 
-    resultdir=common.get_result_dir(t)
-    for t in common.enumerate_available_times(ipv6):
-        outfile=resultdir+'/pathlen'+('6' if ipv6 else '4')+'.txt'
-        generate_pathlen_text(m[t],outfile,ipv6)
-        outfilepfx=resultdir+'/pathlen'+('6' if ipv6 else '4')
-        generate_pathlen_graph(m[t],outfilepfx,ipv6)
+    for d in days:
+        resultdir=outdir_transform(d)
+        outfile='%s/%s-pathlen%d.txt'%(resultdir, host, (6 if ipv6 else 4))
+        gen_pathlen_textfile(m[d], outfile, ipv6)
+        outfilepfx='%s/%s-pathlen%d'%(resultdir, host, (6 if ipv6 else 4))
+        gen_pathlen_graph(m[d], outfilepfx, ipv6)
         
 
             

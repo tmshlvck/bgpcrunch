@@ -17,24 +17,91 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+import os
+import re
 
-import common  
-import bgp
-import cisco
-import ianaspace
-import rpsl
+import common
 
+#import bgp
+#import cisco
+#import ianaspace
+#import rpsl
+
+
+ROOT_DIR=os.path.abspath(os.path.dirname(os.path.realpath(__file__))+'/..')
+DATA_DIR=ROOT_DIR+'/data'
+RESULT_DIR=ROOT_DIR+'/results'
+BGP_DATA={'marge':DATA_DIR+'/marge',}
+BGP_HOSTS=['marge']
+RIPE_DATA=DATA_DIR+'/ripe'
+TMPDIR_PREFIX='bgpcrunch'
+
+
+def resultdir_for_day(day=None):
+        """ Get Day object and return (existing) result directory name for the day.
+        If no day is given, than return the root result dir.
+        """
+
+        if day:
+                d= '%s/%s'%(RESULT_DIR,str(day))
+                common.checkcreatedir(d)
+                return d
+        else:
+                return RESULT_DIR
+
+
+def bgp_pickle_for_day(day,host,ipv6=False):
+        """ Get Day object and return filename for the parsing result pickle. """
+        return '%s/bgp%d-%s.pickle'%(resultdir_for_day(day),
+                                     (6 if ipv6 else 4),host)
+
+
+def prepare_bgp(ipv6=False):
+        """
+        Runs Cisco parser and parse files from data like
+        data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
+        and creates
+        results/2014-04-01/bgp4-marge.pickle
+        Returns list of Time objects.
+        """
+
+        import cisco
+
+        out_days = []
+
+        for host in BGP_HOSTS:
+                for fn in common.enumerate_files(BGP_DATA[host], "bgp-%s-[0-9-]+\.txt.bz2"%
+                                                 ("ipv6" if ipv6 else "ipv4")):
+                        t = common.Day(common.parse_bgp_filename(fn)[1:4])
+                        out_days.append(t)
+                        common.d('BGP in:', fn, 'time:', t)
+                        outdir = resultdir_for_day(t)
+                        outfile = bgp_pickle_for_day(t,host,ipv6)
+
+                        if os.path.isfile(outfile):
+                                common.d('BGP out:', outfile, 'exists. Skip.')
+                        else:
+                                common.d('BGP out:', outfile)
+                                cisco.gen_bgp_pickle(fn, outfile)
+        return out_days
+
+
+
+def gen_bgp_global(host, days, ipv6):
+        """
+        """
+
+        import bgp
+        bgp.module_run(host, days, bgp_pickle_for_day, resultdir_for_day, ipv6)
 
 
 
 def main():
-#        bgp.create_bgp_stats(ipv6=False)
-#        bgp.create_bgp_stats(ipv6=True)
-
-#        ianaspace.create_rir_pfx_stats(ipv6=False)
-
-
-        rdb=rpsl.create_ripe_objectdb_stats()
+        for ipv6 in [False,True]:
+                bgp_days = sorted(prepare_bgp(ipv6))
+                for host in BGP_HOSTS:
+                        gen_bgp_global(host, bgp_days, ipv6)
+                               
 
 
 if __name__ == '__main__':

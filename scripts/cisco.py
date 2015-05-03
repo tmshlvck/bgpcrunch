@@ -25,6 +25,22 @@ import cPickle as pickle
 import common
 
 
+def _get_text_fh(filename):
+    def unbz2(filename):
+        import bz2
+        return bz2.BZ2File(filename)
+
+    def ungz(filename):
+        raise Exception('.gz unsupported at the moment')
+    
+    if re.match('.*\.bz2$', filename):
+        return unbz2(filename)
+    elif re.match('.*\.gz$', filename):
+        return ungz(filename)
+    else:
+        return open(filename,'r')
+
+
 def parse_cisco_bgp_file(filename=None):
     """
     Read Cisco show ip bgp output captured in a file (specified by
@@ -41,7 +57,7 @@ def parse_cisco_bgp_file(filename=None):
     
     filedesc = sys.stdin
     if filename:
-        filedesc=common.get_text_fh(filename)
+        filedesc=_get_text_fh(filename)
 
     nhbeg=None
     apbeg=None
@@ -84,25 +100,36 @@ def parse_cisco_bgp_file(filename=None):
                 indicator=None
 
 
-def parse_cisco_bgp_time(t,ipv6=False):
-    infile=common.get_bgp_file(t,ipv6)
-    resultdir=common.get_result_dir(t)
-    outfile=resultdir+'/bgpdump'+('6' if ipv6 else '4')+'.pkl'
-    
+
+def load_bgp_pickle(filename):
+    """ Load Cisco show ip bgp output captured and transformed to
+    a pickle file that contains list of tuples from parse_cisco_bgp_file.
+    """
+
     o=None
+    common.d("Loading pickle file", filename)
+    with open(filename, 'rb') as input:
+        o = pickle.load(input)
+    return o
+
+
+
+def gen_bgp_pickle(infile,outfile):
+    """ Read Cisco show ip bgp output captured in a infile
+    and generate outfile (pickle that contains list of tuples
+    that parse_cisco_bgp_file returns).
+
+    infile: in filename (prefferably full path to the BGP text file)
+    outfile: out filename
+    """
+
     if os.path.isfile(outfile):
-        if not os.path.isfile(infile):
-            common.warn("No infile for outfile "+outfile)
-
-        common.debug("Loading pickle file "+outfile)
-        with open(outfile, 'rb') as input:
-            o = pickle.load(input)
-        return o
-        
-
+        return load_bgp_pickle(outfile)
+    
     o=list(parse_cisco_bgp_file(infile))
-    common.debug("Saving pickle file "+outfile)
+    common.d("Saving pickle file "+outfile)
     with open(outfile, 'wb') as output:
         pickle.dump(o, output, pickle.HIGHEST_PROTOCOL)
 
     return o
+
