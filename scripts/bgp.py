@@ -1,7 +1,7 @@
 #!/usr/bin/python
 #
 # BGPcrunch - BGP analysis toolset
-# (C) 2014 Tomas Hlavacek (tmshlvck@gmail.com)
+# (C) 2014-2015 Tomas Hlavacek (tmshlvck@gmail.com)
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
