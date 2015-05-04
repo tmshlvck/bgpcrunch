@@ -89,6 +89,9 @@ set timefmt "%Y-%m-%d"
 
 plot'''
 
+    if not data:
+        raise Exception("Can not plot no data. We need at least one point to set the multiline graph.")
+
     for (i,d) in enumerate(data[0]):
         if i==0:
             continue

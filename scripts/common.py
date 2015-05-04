@@ -59,6 +59,9 @@ def w(m):
     sys.stderr.write(m+"\n")
 
 
+
+# Filename utils
+    
 def enumerate_files(dir,pattern):
         """
         Enumerate files in a directory that matches the pattern.
@@ -71,6 +74,13 @@ def enumerate_files(dir,pattern):
                         yield os.path.abspath(dir+'/'+f)
 
 
+def checkcreatedir(dir):
+    if not (os.path.exists(dir) and os.path.isdir(dir)):
+        os.mkdir(dir)
+
+    return dir
+
+                        
 def parse_bgp_filename(filename):
     """
     Input filename='bgp-ipv6-2014-2-16-1-17-2.txt.bz2'
@@ -111,12 +121,54 @@ def parse_ripe_filename(filename):
     return (int(g[1]),int(g[2]),int(g[3]),int(g[4]),int(g[5]),int(g[6]))
 
 
-def checkcreatedir(dir):
-    if not (os.path.exists(dir) and os.path.isdir(dir)):
-        os.mkdir(dir)
-
-    return dir
                         
+
+
+# IP handling
+
+def normalize_ipv4_prefix(pfx):
+    """ Take Cisco/IANA prefix, which might be trimmed (= 192.168.1/24) or
+    without mask on classful boundary (192.168.1.0) and produce
+    correct prefix. """
+
+    
+    def normalize_addr(addr):
+        s=addr.split('.')
+        r=''
+        for i,af in enumerate(s):
+            r+=str(int(af))
+            if i!=len(s)-1:
+                r+='.'
+
+        if len(s) < 4:
+            r +='.0'*(4-len(s))
+        return r
+
+    def resolve_mask(addr):
+        f=int(addr.split('.')[0])
+        if f >= 224:
+            raise Exception("Can not resolve mask for D or E class.")
+                
+        if f <= 127:
+            return 8
+        elif f <= 191:
+            return 16
+        else:
+            return 24
+
+    # Main body
+    a=''
+    m=''
+        
+    s=pfx.split('/')
+    if len(s) == 2:
+        a = normalize_addr(s[0])
+        m = int(s[1])
+    else:
+        a = normalize_addr(pfx)
+        m = resolve_mask(a)
+
+    return str(a)+'/'+str(m)
 
 
 

@@ -26,6 +26,8 @@ import common
 
 
 def _get_text_fh(filename):
+    """ Open gzip/bz2 and uncompressed files seamlessly based on suffix. """
+    
     def unbz2(filename):
         import bz2
         return bz2.BZ2File(filename)
@@ -41,7 +43,8 @@ def _get_text_fh(filename):
         return open(filename,'r')
 
 
-def parse_cisco_bgp_file(filename=None):
+
+def parse_cisco_bgp_file(filename=None,ipv6=False):
     """
     Read Cisco show ip bgp output captured in a file (specified by
     the filename) and returns tuples (indicator,pfx,nexthop,aspath).
@@ -84,6 +87,8 @@ def parse_cisco_bgp_file(filename=None):
             m=PREFIX_REGEX.match(l)
             if m and m.start(2)<nhbeg:
                 pfx=m.group(2)
+                if not ipv6:
+                    pfx=common.normalize_ipv4_prefix(pfx)
 
             m=ADDR_REGEX.match(l)
             if m and m.start(2)>=nhbeg:
@@ -114,19 +119,20 @@ def load_bgp_pickle(filename):
 
 
 
-def gen_bgp_pickle(infile,outfile):
+def gen_bgp_pickle(infile,outfile,ipv6=False):
     """ Read Cisco show ip bgp output captured in a infile
     and generate outfile (pickle that contains list of tuples
     that parse_cisco_bgp_file returns).
 
     infile: in filename (prefferably full path to the BGP text file)
     outfile: out filename
+    ipv6: IPv6 indicator (needed for prefix normalization)
     """
 
     if os.path.isfile(outfile):
         return load_bgp_pickle(outfile)
     
-    o=list(parse_cisco_bgp_file(infile))
+    o=list(parse_cisco_bgp_file(infile, ipv6))
     common.d("Saving pickle file "+outfile)
     with open(outfile, 'wb') as output:
         pickle.dump(o, output, pickle.HIGHEST_PROTOCOL)

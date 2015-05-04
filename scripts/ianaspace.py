@@ -19,20 +19,20 @@
 
 import csv
 import ipaddr
-import itertools
 
 import common
+import graph
 import cisco
 
-iana_ipv4_list='/home/brill/projects/bgpcrunch/data/ipv4-address-space.csv'
-iana_ipv6_list='/home/brill/projects/bgpcrunch/data/ipv6-unicast-address-assignments.csv'
+
 RIRS=['LACNIC','APNIC','ARIN','RIPE NCC','AFRINIC']
 
 
 
 class IanaDirectory(object):
-        def __init__(self,ipv6):
+        def __init__(self,listfile,ipv6):
                 self.ipv6=ipv6
+                self.listfile=listfile
                 #self.table=list(self._read_iana_networks(self.ipv6))
                 self.tree=common.IPLookupTree(self.ipv6)
                 for n in self._read_iana_networks(self.ipv6):
@@ -40,9 +40,7 @@ class IanaDirectory(object):
 
 
         def _read_iana(self,ipv6):
-                listfile=iana_ipv4_list if not ipv6 else iana_ipv6_list
-
-                with open(listfile, 'rb') as csvfile:
+                with open(self.listfile, 'rb') as csvfile:
                         reader = csv.reader(csvfile)
                         for row in reader:
                                 yield row
@@ -50,58 +48,13 @@ class IanaDirectory(object):
 
 
         def _read_iana_networks(self,ipv6):
-                def normalize_addr(addr):
-                        s=addr.split('.')
-                        r=''
-                        for i,af in enumerate(s):
-                                r+=str(int(af))
-                                if i!=len(s)-1:
-                                        r+='.'
-
-                        if len(s) < 4:
-                                r +='.0'*(4-len(s))
-                        return r
-
-                def resolve_mask(addr):
-                        f=int(addr.split('.')[0])
-                        if f >= 224:
-                                raise Exception("Can not resolve mask for D or E class.")
-                
-                        if f <= 127:
-                                return 8
-                        elif f <= 191:
-                                return 16
-                        else:
-                                return 24
-
-
-                def normalize_ipv4_prefix(pfx):
-                        a=''
-                        m=''
-
-                        s=pfx.split('/')
-                        if len(s) == 2:
-                                a = normalize_addr(s[0])
-                                m = int(s[1])
-                        else:
-                                a = normalize_addr(pfx)
-                                m = resolve_mask(a)
-
-                        return str(a)+'/'+str(m)
-                
-
-
                 def normalize_rir(name):
                         return name.replace('Administered by ','').strip()
-
-
 
                 for i,r in enumerate(self._read_iana(ipv6)):
                         if i == 0:
                                 continue
-                        pfx=r[0]
-                        if not ipv6:
-                                pfx=normalize_ipv4_prefix(r[0])
+                        pfx=(r[0] if ipv6 else common.normalize_ipv4_prefix(r[0]))
 
                         yield (ipaddr.IPNetwork(pfx),r[5] if ipv6 else r[4],r[1] if ipv6 else normalize_rir(r[1]))
 
@@ -127,45 +80,64 @@ class IanaDirectory(object):
 
 
 
-def create_rir_pfx_stats(ipv6=False,bestonly=True):
-        iana = IanaDirectory(ipv6)
+def module_run(ianadir, host, days, infile_transform, resultdir_transform, ipv6=False, bestonly=False):
         timeline=[]
+        timelineavg=[]
 
-        for t in common.enumerate_available_times(ipv6):
-                outtxt = common.get_result_dir(t)+'/rirstats'+('6' if ipv6 else '4')+'.txt'
+        for t in days:
                 rirpfxlens={}
-                bgpdump=cisco.parse_cisco_bgp_time(t,ipv6)
+                ifn = infile_transform(t, host, ipv6)
+                if not ifn:
+                        continue
+                bgpdump=cisco.load_bgp_pickle(ifn)
+                common.d("ianaspace.module_run: matching prefixes in a tree (%d)"%len(bgpdump))
+
                 for pv in bgpdump:
                         if bestonly and not (pv[0] and '>' in pv[0]):
                                 continue
 
-                        r=iana.resolve_network(pv[1])
+                        net = ipaddr.IPNetwork(pv[1])
+                        r=ianadir.resolve_network(net)
                         name=r[2]
                         if r[1] == 'LEGACY' and not name in RIRS:
                                 name='LEGACY'
                         if not name in rirpfxlens:
                                 rirpfxlens[name]=[]
-                        rirpfxlens[name].append(r[0].prefixlen)
-                timeline.append([common.time_to_str(t)]+[len(rirpfxlens[n]) for n in RIRS])
+                        rirpfxlens[name].append(net.prefixlen)
+                timeline.append([str(t)]+[len(rirpfxlens[n]) for n in RIRS])
+                timelineavg.append([str(t)]+[float(reduce(lambda x, y: x + y, rirpfxlens[n]))/len(rirpfxlens[n]) for n in RIRS])
 
-                common.debug("Generating output RIR stats text "+outtxt)
+                outtxt = '%s/rirstats%d-%s.txt'%(resultdir_transform(t), (6 if ipv6 else 4), host)
+                common.d("Generating output RIR stats text "+outtxt)
                 with open(outtxt,'w') as f:
-                        for k in RIRS:
-                                f.write(str(k)+": "+str(len(rirpfxlens[k]))+"\n")
+                        for i,k in enumerate(RIRS):
+                                f.write('%s: %d (avg pfxlen: %d)\n'%(str(k), timeline[-1][1+i], timelineavg[-1][1+i]))
 
-        outgraph = common.get_result_dir()+'/rirstats'+('6' if ipv6 else '4')
-        common.debug("Generating output RIR stats graph with prefix "+outgraph)
-        common.gen_multilineplot(timeline,outgraph,legend=RIRS)
+        if timeline:
+                outgraph = '%s/rirpfxcount%d-%s'%(resultdir_transform(), (6 if ipv6 else 4), host)
+                common.d("Generating output RIR pfxcount graph with prefix "+outgraph)
+                graph.gen_multilineplot(timeline,outgraph,legend=RIRS)
+
+        if timelineavg:
+                outgraph = '%s/rirpfxlen%d-%s'%(resultdir_transform(), (6 if ipv6 else 4), host)
+                common.d("Generating output RIR pfxlen graph with prefix "+outgraph)
+                graph.gen_multilineplot(timelineavg,outgraph,legend=RIRS)
         
 
 
-                        
-def main():
-        ipv6=True
 
-        d=IanaDirectory(ipv6)
-        for x in d.table:
-                print str(x)
+def main():
+        import sys
+
+        if len(sys.argv) != 3:
+                print "usage: ianaspace <ipv6: True or False> <iana.csv>"
+                return 
+        ipv6=sys.argv[1].lower() in ("yes", "true", "t", "1")
+        sourcefile=sys.argv[2]
+
+        d=IanaDirectory(sourcefile, ipv6)
+#        for x in d.table:
+#                print str(x)
 
         print "Resolve test:"
         if ipv6:

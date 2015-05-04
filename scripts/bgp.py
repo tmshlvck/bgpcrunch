@@ -126,16 +126,20 @@ def format_buckets(buckets):
     yield "Total prefixes examined: "+str(tpfx)
 
 
-
-#############################
-
 def gen_pathlen_textfile(buckets,outfile,ipv6):
+    """ Gen textfile from buckets of one day (=list 1..32 or 128 of lists of pathlenghts).
+    """
+
+    common.d('gen_pathlen_textfile genering', outfile)
     with open(outfile,'w') as of:
         for l in format_buckets(buckets):
             of.write(l+"\n")
 
          
 def gen_pathlen_graph(buckets,outfile,ipv6):
+    """ TODO doc """
+    
+    common.d('gen_pathlen_graph genering', outfile)
     graph.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],outfile)
     
 
@@ -178,10 +182,12 @@ def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
                 avg.append((ts,avgt/float(nonzerocnt)))
 
     if avg:
+        common.d("bgp.gen_pathlen_timegraph creating", filenamepfx+'avg')
         graph.gen_lineplot(avg,filenamepfx+'avg')
 
     for i in range(0,rng+1):
         if pfxlen[i]:
+            common.d("bgp.gen_pathlen_timegraph creating", filenamepfx+str(i))
             graph.gen_lineplot(pfxlen[i],filenamepfx+str(i))
 
     if d3d:
@@ -189,7 +195,7 @@ def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
 
 
 
-def gen_prefixcount_timegraph(bucket_matrix, filenamepfx, ipv6=False):
+def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
     """ Generate graphs pfxcount4-<number> that shows how many prefixes
     of the length <number> was in DFZ at the defined time. It also generates
     graph pfxcount-sum that shows all the prefixes regardless of prefix length.
@@ -220,10 +226,12 @@ def gen_prefixcount_timegraph(bucket_matrix, filenamepfx, ipv6=False):
         sumall.append((ts,s))
 
     if sumall:
+        common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+'sum')
         graph.gen_lineplot(sumall,filenamepfx+'sum')
 
     for i in range(0,rng+1):
         if counts[i]:
+            common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+str(i))
             graph.gen_lineplot(counts[i],filenamepfx+str(i))
 
 
@@ -238,6 +246,10 @@ def create_path_matrix(host, days, infile_transform, ipv6=False):
 
     for t in days:
         bgpfile=infile_transform(t, host, ipv6)
+        if not bgpfile:
+            common.d("bgp.create_path_matrix skipping time "+str(t)+"...")
+            continue
+
         common.d("bgp.create_path_matrix processing time "+str(t)+"...")
 
         bgpdump=cisco.load_bgp_pickle(bgpfile)
@@ -251,7 +263,7 @@ def module_run(host, days, infile_transform, outdir_transform, ipv6=False):
     """ Main function to be called from run_all. Returns nothing but generates a lot of result files. """
     m=create_path_matrix(host, days, infile_transform, ipv6)
     gen_pathlen_timegraphs(m, outdir_transform(), ipv6)
-    gen_prefixcount_timegraph(m, outdir_transform(), ipv6)
+    gen_prefixcount_timegraphs(m, outdir_transform(), ipv6)
 
     for d in days:
         resultdir=outdir_transform(d)
