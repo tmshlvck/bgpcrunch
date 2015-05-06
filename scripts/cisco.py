@@ -111,11 +111,7 @@ def load_bgp_pickle(filename):
     a pickle file that contains list of tuples from parse_cisco_bgp_file.
     """
 
-    o=None
-    common.d("Loading pickle file", filename)
-    with open(filename, 'rb') as input:
-        o = pickle.load(input)
-    return o
+    return common.load_pickle(filename)
 
 
 
@@ -133,9 +129,8 @@ def gen_bgp_pickle(infile,outfile,ipv6=False):
         return load_bgp_pickle(outfile)
     
     o=list(parse_cisco_bgp_file(infile, ipv6))
-    common.d("Saving pickle file "+outfile)
-    with open(outfile, 'wb') as output:
-        pickle.dump(o, output, pickle.HIGHEST_PROTOCOL)
+
+    common.save_pickle(o, outfile)
 
     return o
 

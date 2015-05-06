@@ -54,8 +54,10 @@ def d(m,*args):
             m += ' '+str(a)
         sys.stderr.write(m+"\n")
 
-def w(m):
+def w(m,*args):
     """ Print warning message. d('fnc_x dbg x=',1,'y=',2) """
+    for a in args:
+        m += ' '+str(a)
     sys.stderr.write(m+"\n")
 
 
@@ -63,16 +65,16 @@ def w(m):
 # Filename utils
     
 def enumerate_files(dir,pattern):
-        """
-        Enumerate files in a directory that matches the pattern.
-        Returns iterator that returns filenames with full path.
-        """
+    """
+    Enumerate files in a directory that matches the pattern.
+    Returns iterator that returns filenames with full path.
+    """
 
-        regex = re.compile(pattern)
-        for f in os.listdir(dir):
-                if regex.match(f):
-                        yield os.path.abspath(dir+'/'+f)
-
+    regex = re.compile(pattern)
+    for f in os.listdir(dir):
+        if regex.match(f):
+            yield os.path.abspath(dir+'/'+f)
+                        
 
 def checkcreatedir(dir):
     if not (os.path.exists(dir) and os.path.isdir(dir)):
@@ -169,32 +171,53 @@ def normalize_ipv4_prefix(pfx):
         m = resolve_mask(a)
 
     return str(a)+'/'+str(m)
-
-
-
-
-
-###########################
-
-
-
-
     
 
 def unpack_ripe_file(filename):
+    """ Decompress .tar.bz2 file that contains RIPE DB tree into a temp dir.
+    Return temp dir name. """
+    
+    TMPDIR_PREFIX='bgpcrunch'
+    
     dir=tempfile.mkdtemp(prefix=TMPDIR_PREFIX)
-    debug('mktempdir: '+dir)
-    debug(BIN_TAR+' jxf '+filename+' -C '+dir)
-    os.system(BIN_TAR+' jxf '+filename+' -C '+dir)
+    c=BIN_TAR+' jxf '+filename+' -C '+dir
+    d('mktempdir:', dir, '+ running:', c)
+    os.system(c)
+    d('Done:', c)
     return dir
 
 
 def cleanup_path(path):
-    debug('Cleaning up path '+path)
+    d('Cleaning up path '+path)
     os.system(BIN_RM+' -rf '+path)
 
 
 
+def load_pickle(filename):
+    """
+    Load an object form the pickle file.
+    """
+
+    o=None
+    d("Loading pickle file", filename)
+    with open(filename, 'rb') as input:
+        o = pickle.load(input)
+    return o
+
+
+
+def save_pickle(obj, outfile):
+    """
+    Save an object to a pickle file.
+    """
+    
+    common.d("Saving pickle file", outfile)
+    with open(outfile, 'wb') as output:
+        pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
+
+    return obj
+
+    
 # Exported classes
 
 
@@ -265,22 +288,91 @@ class IPLookupTree(object):
         index.end = net
         index.data = data
 
-    def lookupFirst(self,ip):
+
+    def lookupAllLevels(self, ip, maxMatches=0):
+        """ Lookup in the tree. Find all matches (i.e. all objects that
+        has some network set in a tree node and the network contains the
+        IP/Network that is being matched.) Return all the results in a form of
+        list. The first is the least specific match and the last is the most
+        specific one.
+
+        maxMatches (int) = maximum matchech in the return list, i.e. stop when we
+        have #maxMatches matches and ignore more specifices. 0=Unlimited
+        """
+
+        if not (isinstance(ip, ipaddr.IPv4Network) or isinstance(ip, ipaddr.IPv6Network) or
+                isinstance(ip, ipaddr.IPv4Address) or isinstance(ip, ipaddr.IPv6Address)):
+            if str(ip).find('/') > 0:
+                ip = ipaddr.IPNetwork(ip)
+            else:
+                ip = ipaddr.IPAddress(ip)
+    
         limit=128 if self.ipv6 else 32
         if isinstance(ip, ipaddr.IPv4Network) or isinstance(ip, ipaddr.IPv6Network):
             limit=ip.prefixlen
 
+        candidates=[]
+
         index = self.root
+        # match address
         for (bi,b) in enumerate(self._bits(ip.packed)):
-            if bi > limit:
-                return None
-
             if index.end and ip in index.end: # match
-                return index.data
+                candidates.append(index.data)
 
+            if bi >= limit or (maxMatches > 0 and len(candidates) >= maxMatches):
+                # limit reached - either pfxlen or maxMatches
+                return candidates
+
+            # choose next step 1 or 0
             if b:
                 index = index.one
             else:
                 index = index.zero
 
-        return None
+            # dead end
+            if not index: 
+                return candidates
+
+        # never reached
+        raise Exception("Reached beyond the tree")
+
+
+    def lookupFirst(self,ip):
+        """ Lookup in the tree. Find the first match (i.e. an object that
+        has some network set in a tree node and the network contains the
+        IP/Network that is being matched.)
+        """
+
+        result = self.lookupAllLevels(ip, 1)
+        if result:
+            return result[0]
+        else:
+            return None
+
+    
+    def lookupBest(self,ip):
+        """ Lookup in the tree. Find the most specific match (i.e. an object that
+        has some network set in a tree node and the network contains the
+        IP/Network that is being matched.) It is pretty much the same the routing
+        mechanisms are doing.
+        """
+        
+        result = self.lookupAllLevels(ip)
+        if result:
+            return result[-1]
+        else:
+            return None
+
+    def dump(self):
+        def printSubtree(node):
+            if not node:
+                return
+            
+            if node.end:
+                print str(node.end)+(' '+str(node.data) if node.data else '')
+                
+            printSubtree(node.zero)
+            printSubtree(node.one)
+
+        printSubtree(self.root)
+        

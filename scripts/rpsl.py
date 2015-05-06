@@ -1,7 +1,7 @@
 #!/usr/bin/python
 #
 # BGPcrunch - BGP analysis toolset
-# (C) 2014 Tomas Hlavacek (tmshlvck@gmail.com)
+# (C) 2014-2015 Tomas Hlavacek (tmshlvck@gmail.com)
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 
 import re
 import sys
+import os
 
 import common
 import ianaspace
@@ -28,107 +29,136 @@ class RpslObject(object):
     def __init__(self,textlines):
         self.text=textlines
 
+    @staticmethod
+    def parseRipeFile(filename, targetClass):
+        """ Parse RIPE object file of a targetClass. Theoretically more
+        types might be  supported and modifier to __init__ of each class
+        has to be created. """
+        def flushrobj(ot):
+            if ot:
+                try:
+                    return targetClass(ot)
+                except Exception as e:
+                    common.w("Object parse exception: "+str(e))
+    
+        with open(filename, 'r') as sf:
+            objecttext=[]
+            for l in sf.readlines():
+                if l.strip()=='':
+                    o=flushrobj(objecttext)
+                    if o:
+                        yield o
+                
+                    objecttext=[]
+                else:
+                    objecttext.append(l)
+
+            # last one
+            o=flushrobj(objecttext)
+            if o:
+                yield o
+
+
+    def splitLines(self):
+        """ Returns generator of tuples (attribute,value) and discards comments. """
+
+        buf=('','')
+        for l in self.text:
+            # Discard comments
+            c = l.find('#')
+            if c >= 0:
+                l = l[:c]
+
+            if l.strip() == '':
+                continue
+
+            if buf:
+                if not (l[0].isspace() or l[0]=='+' ):
+                    yield buf
+                else:
+                    buf=(buf[0],str(buf[1]+' '+l[1:].strip()).strip())
+                    continue
+
+
+            # Find attr and value
+            gr=l.strip().split(':',1)
+            if len (gr) != 2:
+                raise Exception("Can not parse line: "+l)
+
+            buf=(gr[0].strip(), gr[1].strip())
+
+        yield buf
+
 
 class RouteObject(RpslObject):
     ROUTE_ATTR = 'route'
     ORIGIN_ATTR = 'origin'
     def __init__(self,textlines):
+        RpslObject.__init__(self,textlines)
         self.route=None
         self.origin=None
-        
-        for l in textlines:
-            gr=l.split(':',1)
-            if gr[0]==self.ROUTE_ATTR:
-                self.route=str(gr[1]).strip()
-            elif gr[0]==self.ORIGIN_ATTR:
-                self.origin=str(gr[1]).strip()
 
+        for (a,v) in self.splitLines():
+            if a==self.ROUTE_ATTR:
+                self.route=v
+            elif a==self.ORIGIN_ATTR:
+                if v.lower()[:2] == 'as':
+                    self.origin=int(v[2:].strip())
+                else:
+                    raise Exception("Can not parse tuple "+a+":"+v)
+
+            # TODO: Add holes
             if self.route and self.origin:
                 break
 
         if not (self.route and self.origin):
             raise Exception("Can not create RouteObject out of text: "+str(textlines))
 
+    def __str__(self):
+        return 'RouteObject: '+str(self.route)+'->'+str(self.origin)
 
-def parse_route_objects(filename):
-    def flushobj(ot):
-        if ot:
-            try:
-                return RouteObject(ot)
-            except Exception as e:
-                common.debug("Route object parse exception: "+str(e))
-    
-    with open(filename, 'r') as sf:
-        objecttext=[]
-        for l in sf.readlines():
-            l=l.strip()
-            if l=='':
-                o=flushobj(objecttext)
-                if o:
-                    yield o
-                
-                objecttext=[]
-            else:
-                objecttext.append(l)
-
-        o=flushobj(objecttext)
-        if o:
-            yield o
+    def __repr__(self):
+        return self.__str__()
 
 
+class RouteObjectDir(object):
+    def __init__(self,filename,ipv6=False):
+        self.originTable={}
+        self._initTree(RpslObject.parseRipeFile(filename,RouteObject),ipv6)
+
+    def _initTree(self,routeobjects,ipv6):
+        """ routeobjects is supposedly a generator... """
+        self.tree=common.IPLookupTree(ipv6)
+        for o in routeobjects:
+            self.tree.add(o.route,o)
+            if not o.origin in self.originTable:
+                self.originTable[o.origin]=[]
+            self.originTable[o.origin].append(o)
+
+
+    def getRouteObjs(self, prefix):
+        return self.tree.lookupAllLevels(prefix)
+
+
+
+######################
 
 class AutNumObject(RpslObject):
     def __init__(self,textlines):
         pass
 
-# HACK HACK HACK TODO normalize + tree + remove duplication
-def getroute(routeobjects,prefix):
-    def normalize_addr(addr):
-        s=addr.split('.')
-        r=''
-        for i,af in enumerate(s):
-            r+=str(int(af))
-            if i!=len(s)-1:
-                r+='.'
-
-        if len(s) < 4:
-            r +='.0'*(4-len(s))
-        return r
-
-    def resolve_mask(addr):
-        f=int(addr.split('.')[0])
-        if f >= 224:
-            raise Exception("Can not resolve mask for D or E class.")
-                
-        if f <= 127:
-            return 8
-        elif f <= 191:
-            return 16
-        else:
-            return 24
 
 
-    def normalize_ipv4_prefix(pfx):
-        a=''
-        m=''
 
-        s=pfx.split('/')
-        if len(s) == 2:
-            a = normalize_addr(s[0])
-            m = int(s[1])
-        else:
-            a = normalize_addr(pfx)
-            m = resolve_mask(a)
 
-        return str(a)+'/'+str(m)
 
-    res=[]
-    for o in routeobjects:
-        if str(normalize_ipv4_prefix(prefix)) == str(o.route):
-            res.append(o)
-    return res
 
-# TODO: replace getroute with tree, support IPv6
+
+
+######################################################################
+
+
+
 def check_ripe_routes(time,rpsldir,ipv6=False,bestonly=True):
     idir = ianaspace.IanaDirectory(ipv6)
     riperoutes=None
@@ -165,9 +195,6 @@ def check_ripe_routes(time,rpsldir,ipv6=False,bestonly=True):
     
 
 
-
-def daily_stats(time,rpsldir,):
-    check_ripe_routes(time,rpsldir,False)
     
 
     
@@ -190,17 +217,37 @@ def create_ripe_objectdb_stats():
                 
 #                common.cleanup_path(rpsldir)
 
+def module_prepare(srcdir, dstdir):
+    """
+    Prepare crunched RIPE DB for a day. In most cases it means parsing
+    text files, crating proper data structures and saving them as pickle files.
+    """
 
+    ripe_routes_sourcefile=srcdir+'/ripe.db.route'
+    ripe_routes_dstfile=dstdir+'/ripe.route.pickle'
+
+    if os.path.isfile(ripe_routes_sourcefile):
+        ros=RouteObjectDir(ripe_routes_sourcefile, False)
+        common.save_pickle(ros, ripe_routes_dstfile)
+    else:
+        raise Exception("Missing file "+ripe_routes_sourcefile)
+
+    # TODO: Create directories for AutNums && InetNums && AS-Sets
+
+
+def module_run():
+    # check_ripe_routes(...)
+    
+    pass
 
 
 def main():
-    riperoutes=parse_route_objects("/tmp/bgpcrunch45O5jU"+"/ripe.db.route")
-    getroute(riperoutes,"2.10.0.0/16")
+    # raise Exception("This test does not work unless special environment is set.")
+
+    ripeRoutes=RouteObjectDir("/tmp/bgpcrunchVs4aOl"+"/ripe.db.route", False)
+    # ripeRoutes.tree.dump()
+    print str(ripeRoutes.getRouteObjs("2.10.0.0/16"))
     return
-    
-    for o in parse_route_objects(sys.argv[1]):
-        print "O: "+str(o.route)+" -> "+str(o.origin)
-        
 
 
 if __name__ == '__main__':

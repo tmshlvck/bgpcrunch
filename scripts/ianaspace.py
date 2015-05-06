@@ -98,6 +98,9 @@ def module_run(ianadir, host, days, infile_transform, resultdir_transform, ipv6=
 
                         net = ipaddr.IPNetwork(pv[1])
                         r=ianadir.resolve_network(net)
+                        if not r:
+                                common.w("No IANA assignmen for", str(pv[1]))
+                                continue
                         name=r[2]
                         if r[1] == 'LEGACY' and not name in RIRS:
                                 name='LEGACY'
