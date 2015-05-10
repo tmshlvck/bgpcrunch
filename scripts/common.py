@@ -21,8 +21,7 @@ import sys
 import re
 import os
 import tempfile
-import operator
-
+import cPickle as pickle
 import ipaddr
 
 
@@ -82,45 +81,34 @@ def checkcreatedir(dir):
 
     return dir
 
-                        
-def parse_bgp_filename(filename):
-    """
-    Input filename='bgp-ipv6-2014-2-16-1-17-2.txt.bz2'
-    Output (ipv6,year,month,day,hour,min,sec)
+
+
+# Path generation functions
+
+# Globals
+_glob_result_dir=None
+
+def module_init(result_dir):
+    """ Initialize module paths etc. """
+
+    global _glob_result_dir
+    
+    _glob_result_dir=result_dir
+
+
+def resultdir(day=None):
+    """ Get Day object and return (existing) result directory name for the day.
+    If no day is given, than return the root result dir.
     """
 
-    ipv6=False
-
-    basename=os.path.basename(filename)
-    g=basename.split('-')
-    if g[0] != 'bgp':
-        raise Exception('Can not parse filename: '+filename)
-    if g[1] == 'ipv6':
-        ipv6=True
-    elif g[1] == 'ipv4':
-        ipv6=False
+    global _glob_result_dir
+    
+    if day:
+        d= '%s/%s'%(_glob_result_dir, str(day))
+        checkcreatedir(d)
+        return d
     else:
-        raise Exception('Can not parse filename: '+filename)
-
-    g[7]=g[7].split('.',1)[0]
-
-    return (ipv6,int(g[2]),int(g[3]),int(g[4]),int(g[5]),int(g[6]),int(g[7]))
-
-
-def parse_ripe_filename(filename):
-    """
-    Input filename='ripedb-2014-2-16-1-17-2.txt.bz2'
-    Output (ipv6,year,month,day,hour,min,sec)
-    """
-
-    basename=os.path.basename(filename)
-    g=basename.split('-')
-    if g[0] != 'ripedb':
-        raise Exception('Can not parse filename: '+filename)
-
-    g[6]=g[6].split('.',1)[0]
-
-    return (int(g[1]),int(g[2]),int(g[3]),int(g[4]),int(g[5]),int(g[6]))
+        return _glob_result_dir
 
 
                         
@@ -211,7 +199,7 @@ def save_pickle(obj, outfile):
     Save an object to a pickle file.
     """
     
-    common.d("Saving pickle file", outfile)
+    d("Saving pickle file", outfile)
     with open(outfile, 'wb') as output:
         pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
 
@@ -248,18 +236,19 @@ class Day(object):
         return (self.time == other.time)
 
 
-class IPLookupTree(object):
-    class IPLookupTreeNode:
-        def __init__(self):
-            self.one=None
-            self.zero=None
-            self.end=None
-            self.data=None
-
+class _IPLookupTreeNode(object):
+    """ Internal Node for the IPLookupTree. Should not be
+    even public unless cPickle needs it. How unfortunate. """
+    def __init__(self):
+        self.one=None # _IPLookupTreeNode or None
+        self.zero=None # _IPLookupTreeNode or None
+        self.end=None # String (do not use ipaddr.IPNetwork, pickle fails in that case)
+        self.data=None # cave pickle
     
+class IPLookupTree(object):
     def __init__(self,ipv6=False):
         self.ipv6=ipv6
-        self.root=IPLookupTree.IPLookupTreeNode()
+        self.root=_IPLookupTreeNode()
 
     def _bits(self,chararray):
         for c in chararray:
@@ -279,27 +268,17 @@ class IPLookupTree(object):
         for bi in range(0,net.prefixlen):
             if bits[bi]:
                 if not index.one:
-                    index.one = self.IPLookupTreeNode()
+                    index.one = _IPLookupTreeNode()
                 index = index.one
             else:
                 if not index.zero:
-                    index.zero = self.IPLookupTreeNode()
+                    index.zero = _IPLookupTreeNode()
                 index = index.zero
-        index.end = net
+        index.end = str(net)
         index.data = data
 
 
-    def lookupAllLevels(self, ip, maxMatches=0):
-        """ Lookup in the tree. Find all matches (i.e. all objects that
-        has some network set in a tree node and the network contains the
-        IP/Network that is being matched.) Return all the results in a form of
-        list. The first is the least specific match and the last is the most
-        specific one.
-
-        maxMatches (int) = maximum matchech in the return list, i.e. stop when we
-        have #maxMatches matches and ignore more specifices. 0=Unlimited
-        """
-
+    def _lookupAllLevelsNode(self, ip, maxMatches=0):
         if not (isinstance(ip, ipaddr.IPv4Network) or isinstance(ip, ipaddr.IPv6Network) or
                 isinstance(ip, ipaddr.IPv4Address) or isinstance(ip, ipaddr.IPv6Address)):
             if str(ip).find('/') > 0:
@@ -316,8 +295,8 @@ class IPLookupTree(object):
         index = self.root
         # match address
         for (bi,b) in enumerate(self._bits(ip.packed)):
-            if index.end and ip in index.end: # match
-                candidates.append(index.data)
+            if index.end and ip in ipaddr.IPNetwork(index.end): # match
+                candidates.append(index)
 
             if bi >= limit or (maxMatches > 0 and len(candidates) >= maxMatches):
                 # limit reached - either pfxlen or maxMatches
@@ -333,11 +312,22 @@ class IPLookupTree(object):
             if not index: 
                 return candidates
 
-        # never reached
-        raise Exception("Reached beyond the tree")
+        # in case full IP address was matched in the tree
+        return candidates
 
+    def lookupAllLevels(self, ip, maxMatches=0):
+        """ Lookup in the tree. Find all matches (i.e. all objects that
+        has some network set in a tree node and the network contains the
+        IP/Network that is being matched.) Return all the results in a form of
+        list. The first is the least specific match and the last is the most
+        specific one.
 
-    def lookupFirst(self,ip):
+        maxMatches (int) = maximum matchech in the return list, i.e. stop when we
+        have #maxMatches matches and ignore more specifices. 0=Unlimited
+        """
+        return [n.data for n in self._lookupAllLevelsNode(ip, maxMatches)]
+
+    def lookupFirst(self, ip):
         """ Lookup in the tree. Find the first match (i.e. an object that
         has some network set in a tree node and the network contains the
         IP/Network that is being matched.)
@@ -350,7 +340,7 @@ class IPLookupTree(object):
             return None
 
     
-    def lookupBest(self,ip):
+    def lookupBest(self, ip):
         """ Lookup in the tree. Find the most specific match (i.e. an object that
         has some network set in a tree node and the network contains the
         IP/Network that is being matched.) It is pretty much the same the routing
@@ -362,6 +352,16 @@ class IPLookupTree(object):
             return result[-1]
         else:
             return None
+
+    def lookupNetExact(self, net):
+        """ Lookup in the tree. Find the exact match for a net (i.e. an object that
+        has some network set in a tree node and the network contains the
+        IP/Network that is being matched.) It is pretty much the same the routing
+        mechanisms are doing.
+        """
+
+        results = self._lookupAllLevelsNode(net)
+        return [r.data for r in results if ipaddr.IPNetwork(r.end).prefixlen == ipaddr.IPNetwork(net).prefixlen]
 
     def dump(self):
         def printSubtree(node):

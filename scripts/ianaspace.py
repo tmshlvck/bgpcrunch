@@ -23,6 +23,7 @@ import ipaddr
 import common
 import graph
 import cisco
+import bgp
 
 
 RIRS=['LACNIC','APNIC','ARIN','RIPE NCC','AFRINIC']
@@ -80,16 +81,16 @@ class IanaDirectory(object):
 
 
 
-def module_run(ianadir, host, days, infile_transform, resultdir_transform, ipv6=False, bestonly=False):
+def module_run(ianadir, host, days, ipv6=False, bestonly=False):
         timeline=[]
         timelineavg=[]
 
         for t in days:
                 rirpfxlens={}
-                ifn = infile_transform(t, host, ipv6)
+                ifn = bgp.bgpdump_pickle(t, host, ipv6)
                 if not ifn:
                         continue
-                bgpdump=cisco.load_bgp_pickle(ifn)
+                bgpdump=common.load_pickle(ifn)
                 common.d("ianaspace.module_run: matching prefixes in a tree (%d)"%len(bgpdump))
 
                 for pv in bgpdump:
@@ -110,19 +111,19 @@ def module_run(ianadir, host, days, infile_transform, resultdir_transform, ipv6=
                 timeline.append([str(t)]+[len(rirpfxlens[n]) for n in RIRS])
                 timelineavg.append([str(t)]+[float(reduce(lambda x, y: x + y, rirpfxlens[n]))/len(rirpfxlens[n]) for n in RIRS])
 
-                outtxt = '%s/rirstats%d-%s.txt'%(resultdir_transform(t), (6 if ipv6 else 4), host)
+                outtxt = '%s/rirstats%d-%s.txt'%(common.resultdir(t), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR stats text "+outtxt)
                 with open(outtxt,'w') as f:
                         for i,k in enumerate(RIRS):
                                 f.write('%s: %d (avg pfxlen: %d)\n'%(str(k), timeline[-1][1+i], timelineavg[-1][1+i]))
 
         if timeline:
-                outgraph = '%s/rirpfxcount%d-%s'%(resultdir_transform(), (6 if ipv6 else 4), host)
+                outgraph = '%s/rirpfxcount%d-%s'%(common.resultdir(), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR pfxcount graph with prefix "+outgraph)
                 graph.gen_multilineplot(timeline,outgraph,legend=RIRS)
 
         if timelineavg:
-                outgraph = '%s/rirpfxlen%d-%s'%(resultdir_transform(), (6 if ipv6 else 4), host)
+                outgraph = '%s/rirpfxlen%d-%s'%(common.resultdir(), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR pfxlen graph with prefix "+outgraph)
                 graph.gen_multilineplot(timelineavg,outgraph,legend=RIRS)
         

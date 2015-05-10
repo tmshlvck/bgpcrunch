@@ -37,89 +37,42 @@ IANA_IPV4=DATA_DIR+'/ipv4-address-space.csv'
 IANA_IPV6=DATA_DIR+'/ipv6-unicast-address-assignments.csv'
 
 RIPE_DATA=DATA_DIR+'/ripe'
-TMPDIR_PREFIX='bgpcrunch'
-
-
-# File handling routines
-
-def resultdir_for_day(day=None):
-        """ Get Day object and return (existing) result directory name for the day.
-        If no day is given, than return the root result dir.
-        """
-
-        if day:
-                d= '%s/%s'%(RESULT_DIR,str(day))
-                common.checkcreatedir(d)
-                return d
-        else:
-                return RESULT_DIR
-
-
-def filename_bgp_pickle_for_day(day,host,ipv6=False,check_exist=True):
-        """ Get Day object and return filename for the parsing result pickle. """
-        
-        fn = '%s/bgp%d-%s.pickle'%(resultdir_for_day(day), (6 if ipv6 else 4), host)
-        if check_exist and not os.path.isfile(fn):
-                return None
-        else:
-                return fn
 
 
 
 # Module data crunching routies
 
-def prepare_bgp(ipv6=False):
-        """
-        Runs Cisco parser and parse files from data like
-        data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
-        and creates
-        results/2014-04-01/bgp4-marge.pickle
-        Returns list of Time objects.
-        """
+def iana_module_prepare(ipv6=False):
+        """ Initialize ianaspace's IanaDirectory object for the current AF. """
 
-        out_days = []
-
-        for host in BGP_HOSTS:
-                for fn in common.enumerate_files(BGP_DATA[host], "bgp-%s-[0-9-]+\.txt.bz2"%
-                                                 ("ipv6" if ipv6 else "ipv4")):
-                        t = common.Day(common.parse_bgp_filename(fn)[1:4])
-                        out_days.append(t)
-                        common.d('BGP in:', fn, 'time:', t)
-                        outdir = resultdir_for_day(t)
-                        outfile = filename_bgp_pickle_for_day(t, host, ipv6, False)
-
-                        if os.path.isfile(outfile):
-                                common.d('BGP out:', outfile, 'exists. Skip.')
-                        else:
-                                common.d('BGP out:', outfile)
-                                cisco.gen_bgp_pickle(fn, outfile, ipv6)
-        return out_days
-
-
-def prepare_iana(ipv6=False):
         fn = (IANA_IPV6 if ipv6 else IANA_IPV4)
         return ianaspace.IanaDirectory(fn,ipv6)
 
 
 
-
-
-
 def main():
+        common.module_init(RESULT_DIR)
+
+        # Prepare RPSL parsing products
+        ripe_days = sorted(rpsl.module_prepare(DATA_DIR))
+
         for ipv6 in [False,True]:
                 # Prepare IANA directory
-                ianadir=prepare_iana(ipv6)
+                ianadir=iana_module_prepare(ipv6)
 
                 # Create BGP data in result directories (= ROOT/results/2014-04-01/bgp4-marge.pickle).
                 # Use filename_bgp_pickle_for_day() to get the filename.
 
-                bgp_days = sorted(prepare_bgp(ipv6))
+                bgp_days = sorted(bgp.module_prepare(BGP_HOSTS, BGP_DATA, ipv6))
 
                 for host in BGP_HOSTS:
                         # Run basic BGP stats
-                        bgp.module_run(host, bgp_days, filename_bgp_pickle_for_day, resultdir_for_day, ipv6)
+                        bgp.module_run(host, bgp_days, ipv6)
 
-                        ianaspace.module_run(ianadir, host, bgp_days, filename_bgp_pickle_for_day, resultdir_for_day, ipv6, bestonly=True)
+                        # Run basic BGP stats with regards to IANA top-level assignments
+                        ianaspace.module_run(ianadir, host, bgp_days, ipv6, bestonly=True)
+
+                rpsl.module_run(ripe_days, ianadir, host, bgp_days, ipv6)
 
 
 if __name__ == '__main__':

@@ -20,7 +20,6 @@
 import re
 import sys
 import os
-import cPickle as pickle
 
 import common
 
@@ -106,16 +105,7 @@ def parse_cisco_bgp_file(filename=None,ipv6=False):
 
 
 
-def load_bgp_pickle(filename):
-    """ Load Cisco show ip bgp output captured and transformed to
-    a pickle file that contains list of tuples from parse_cisco_bgp_file.
-    """
-
-    return common.load_pickle(filename)
-
-
-
-def gen_bgp_pickle(infile,outfile,ipv6=False):
+def gen_bgpdump_pickle(infile,outfile,ipv6=False):
     """ Read Cisco show ip bgp output captured in a infile
     and generate outfile (pickle that contains list of tuples
     that parse_cisco_bgp_file returns).
@@ -126,7 +116,7 @@ def gen_bgp_pickle(infile,outfile,ipv6=False):
     """
 
     if os.path.isfile(outfile):
-        return load_bgp_pickle(outfile)
+        return common.load_pickle(outfile)
     
     o=list(parse_cisco_bgp_file(infile, ipv6))
 

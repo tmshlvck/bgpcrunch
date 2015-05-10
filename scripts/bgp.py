@@ -19,6 +19,7 @@
 
 import sys
 import re
+import os
 import getopt
 
 import common
@@ -237,7 +238,7 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
 
 
 
-def create_path_matrix(host, days, infile_transform, ipv6=False):
+def create_path_matrix(host, days, ipv6=False):
     """ Generate matrix: [t:buckets,...] where buckets (r) contains
     r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
@@ -245,28 +246,100 @@ def create_path_matrix(host, days, infile_transform, ipv6=False):
     bucket_matrix={}
 
     for t in days:
-        bgpfile=infile_transform(t, host, ipv6)
+        bgpfile=bgpdump_pickle(t, host, ipv6)
         if not bgpfile:
             common.d("bgp.create_path_matrix skipping time "+str(t)+"...")
             continue
 
         common.d("bgp.create_path_matrix processing time "+str(t)+"...")
 
-        bgpdump=cisco.load_bgp_pickle(bgpfile)
+        bgpdump=common.load_pickle(bgpfile)
         bucket_matrix[t]=gen_buckets(bgpdump, ipv6, bestonly=True)
 
     return bucket_matrix
 
 
 
-def module_run(host, days, infile_transform, outdir_transform, ipv6=False):
+# File handling
+
+def bgpdump_pickle(day,host,ipv6=False,check_exist=True):
+        """ Get Day object and return filename for the parsing result pickle. """
+        
+        fn = '%s/bgp%d-%s.pickle'%(common.resultdir(day), (6 if ipv6 else 4), host)
+        if check_exist and not os.path.isfile(fn):
+                return None
+        else:
+                return fn
+
+
+def decode_bgp_filename(filename):
+    """
+    Input filename='bgp-ipv6-2014-2-16-1-17-2.txt.bz2'
+    Output (ipv6,year,month,day,hour,min,sec)
+    """
+
+    ipv6=False
+
+    basename=os.path.basename(filename)
+    g=basename.split('-')
+    if g[0] != 'bgp':
+        raise Exception('Can not parse filename: '+filename)
+    if g[1] == 'ipv6':
+        ipv6=True
+    elif g[1] == 'ipv4':
+        ipv6=False
+    else:
+        raise Exception('Can not parse filename: '+filename)
+
+    g[7]=g[7].split('.',1)[0]
+
+    return (ipv6,int(g[2]),int(g[3]),int(g[4]),int(g[5]),int(g[6]),int(g[7]))
+
+
+# Module interface
+
+
+def module_prepare(bgp_hosts, bgp_data, ipv6=False):
+        """
+        Runs Cisco parser and parse files from data like
+        data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
+        and creates
+        results/2014-04-01/bgp4-marge.pickle
+        Returns list of Time objects.
+
+        bgp_hosts: list of hostnames
+        bgp_data: hash bgp_host -> source directory
+        """
+
+        out_days = []
+
+        for host in bgp_hosts:
+                for fn in common.enumerate_files(bgp_data[host], "bgp-%s-[0-9-]+\.txt.bz2"%
+                                                 ("ipv6" if ipv6 else "ipv4")):
+                        t = common.Day(decode_bgp_filename(fn)[1:4])
+                        out_days.append(t)
+                        common.d('BGP in:', fn, 'time:', t)
+                        outdir = common.resultdir(t)
+                        outfile = bgpdump_pickle(t, host, ipv6, False)
+
+                        if os.path.isfile(outfile):
+                                common.d('BGP out:', outfile, 'exists. Skip.')
+                        else:
+                                common.d('BGP out:', outfile)
+                                cisco.gen_bgpdump_pickle(fn, outfile, ipv6)
+        return out_days
+
+
+
+
+def module_run(host, days, ipv6=False):
     """ Main function to be called from run_all. Returns nothing but generates a lot of result files. """
-    m=create_path_matrix(host, days, infile_transform, ipv6)
-    gen_pathlen_timegraphs(m, outdir_transform(), ipv6)
-    gen_prefixcount_timegraphs(m, outdir_transform(), ipv6)
+    m=create_path_matrix(host, days, ipv6)
+    gen_pathlen_timegraphs(m, common.resultdir(), ipv6)
+    gen_prefixcount_timegraphs(m, common.resultdir(), ipv6)
 
     for d in days:
-        resultdir=outdir_transform(d)
+        resultdir=common.resultdir(d)
         outfile='%s/%s-pathlen%d.txt'%(resultdir, host, (6 if ipv6 else 4))
         gen_pathlen_textfile(m[d], outfile, ipv6)
         outfilepfx='%s/%s-pathlen%d'%(resultdir, host, (6 if ipv6 else 4))
