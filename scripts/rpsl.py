@@ -35,6 +35,9 @@ RIPE_BGP2ROUTES4_PICKLE='/bgp2routes.pickle'
 RIPE_BGP2ROUTES6_TXT='/bgp2routes.txt'
 RIPE_BGP2ROUTES6_PICKLE='/bgp2routes.pickle'
 
+RIPE_ROUTE_VIOLATION_TIMELINE='/route_violations_timeline.txt'
+RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
+
 class RpslObject(object):
     def __init__(self,textlines):
         self.text=textlines
@@ -193,6 +196,52 @@ def decode_ripe_tgz_filename(filename):
 
 # Checking code
 
+def check_ripe_route(path_vector, iana_dir, ripe_routes):
+    """
+    Do the actual checking of a route. Returns vector
+    (prefix, as-path, routeObj or None, status) and
+    status might be 0=OK, 1=aggregate, 2=missing origin, 3=not match,
+    4=not found, 5=non-RIPE NCC.
+    """
+
+    # assert...
+    if not path_vector[1].find('/')>0:
+        raise Exception("Pfx not normalized: "+str(path_vector))
+        ################
+
+    if len(path_vector[3].split(' '))>=2:
+        orig=path_vector[3].split(' ')[-2]
+        if orig.find("{")>=0:
+            #common.d("Skipping prefix with aggregated begining of ASpath:", orig)
+            return (path_vector[1],path_vector[3],None,1)
+
+    else:
+        # localy originated prefix?
+        common.w('Skipping prefix with less than 2 records in ASpath: ', path_vector)
+        return (path_vector[1],path_vector[3],None,2)
+
+    iananet=iana_dir.resolve_network(path_vector[1])
+    if iananet[2] == 'RIPE NCC':
+        routes=ripe_routes.getRouteObjs(path_vector[1])
+        if routes:
+            notmatchro=[]
+            for r in routes:
+                if r.origin == int(orig):
+                    #common.d("Route object match for", path_vector[1], '('+path_vector[3]+"):", str(r))
+                    return (path_vector[1], [path_vector[3]], r, 0)
+                else:        
+                    #common.d("Route object NOT match", str(r.route), "("+str(r.origin)+") found for", str(pv[1]), "from AS"+str(orig))
+                    notmatchro.append(r)
+            else: # for finished without matching
+                return (path_vector[1], path_vector[3], notmatchro, 3)
+        else:
+            #common.d("No route object found for", str(path_vector[1]))
+            return(path_vector[1], path_vector[3], None, 4)
+    else:
+        #common.d("Skipping non-RIPE NCC network", path_vector[1], "which is part of", str(iananet[0]), "("+str(iananet[2])+")")
+        return (path_vector[1], path_vector[3], None, 5)
+
+
 
 def check_ripe_routes(day, ianadir, host, bgp_days, ipv6=False, bestonly=True):
     """
@@ -219,50 +268,11 @@ def check_ripe_routes(day, ianadir, host, bgp_days, ipv6=False, bestonly=True):
         riperoutes=common.load_pickle(ripe_route_pickle(day))
 
     bgpdump=common.load_pickle(bgp.bgpdump_pickle(day, host, ipv6))
-    for pv in bgpdump:
-        if bestonly and not (pv[0] and '>' in pv[0]):
+    for path_vector in bgpdump:
+        if bestonly and not (path_vector[0] and '>' in path_vector[0]):
             continue
 
-        # assert...
-        if not pv[1].find('/')>0:
-            raise Exception("Pfx not normalized: "+str(pv))
-        ################
-
-        if len(pv[3].split(' '))>=2:
-            orig=pv[3].split(' ')[-2]
-            if orig.find("{")>=0:
-                #common.d("Skipping prefix with aggregated begining of ASpath:", orig)
-                res.append((pv[1],pv[3],None,1))
-                continue
-        else:
-            # localy originated prefix?
-            common.w('Skipping prefix with less than 2 records in ASpath: ', pv)
-            res.append((pv[1],pv[3],None,2))
-            continue
-
-        iananet=ianadir.resolve_network(pv[1])
-        if iananet[2] == 'RIPE NCC':
-            routes=riperoutes.getRouteObjs(pv[1])
-            if routes:
-                match=False
-                for r in routes:
-                    if r.origin == int(orig):
-                        #common.d("Route object match for", pv[1], '('+pv[3]+"):", str(r))
-                        res.append((pv[1],pv[3],r,0))
-                        match=True
-                        break
-                if not match:
-                    common.d("Route object NOT match", str(r.route), "("+str(r.origin)+") found for", str(pv[1]), "from AS"+str(orig))
-                    res.append((pv[1],pv[3],None,3))
-            else:
-                #common.d("No route object found for", str(pv[1]))
-                res.append((pv[1],pv[3],None,4))
-        else:
-            #common.d("Skipping non-RIPE NCC network", pv[1], "which is part of", str(iananet[0]), "("+str(iananet[2])+")")
-            res.append((pv[1],pv[3],None,5))
-
-    return res
-
+        yield check_ripe_route(path_vector, ianadir, riperoutes)
 
 
 
@@ -322,32 +332,60 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
     return (day, total_ok, total_aggregate, total_missing,
             total_notmatch, total_notfound, total_nonripe)
 
+
+
+
+
+def ripe_filter_violating_routes(matched_pfxes):
+    """ Filter routes from result of check_ripe_routes() that needs attention.
+    Return list of prefixes. """
+
+    for p in matched_pfxes:
+        if p[3]==3 or p[3]==4: # not match or not found
+            yield p[0]
+
+
+def ripe_gen_route_timeline(violators, ripe_days, bgp_days, ipv6=False):
+    """ Generate timeline for each suspect route. """
+
+    timeline={}
+
+    for v in violators:
+        timeline[v]=[]
     
+    for d in sorted(ripe_days):
+        if d in bgp_days: # test if we have BGP data for the day
+            common.d("ripe_gen_route_timeline: Working on day %s"%str(d))
+            bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
+            dayres=common.load_pickle(bgp2routesfn)
+            # dayres contains list of tuples (prefix, as-path, routeObj or None, status)
 
-# TODO    
-def create_ripe_objectdb_stats():
-        for t in list(set(common.enumerate_available_times(False)) |
-                      set(common.enumerate_available_times(True))):
-#                ripefile = common.get_ripe_file(t)
-#                if not ripefile:
-#                        common.debug("Skipping RPSL parse for time "+str(t)+". No DB snapshot available.")
-#                        continue
-                
-#                common.debug("Processing time "+str(t)+"...")
-#                common.debug("RIPE file: "+str(ripefile))
+            for rv in dayres:
+                if rv[0] in timeline:
+                    if len(timeline[rv[0]])==0 or timeline[rv[0]][-1] != rv[1:]:
+                        timeline[rv[0]].append(tuple([d]+list(rv)))
 
-#                rpsldir=common.unpack_ripe_file(ripefile)
-#                common.debug("RIPE unpack result: "+rpsldir)
+    return timeline
 
-                rpsldir = "/tmp/bgpcrunch45O5jU"
-                daily_stats(t,rpsldir)
-                
-#                common.cleanup_path(rpsldir)
+def report_route_timeline(timeline, ipv6=False):
+    """ Generate textual report on prefixes that has or had problems. """
 
+    txtout=common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE)
+    common.d('Writing timeline to:', txtout)
+    with open(txtout, 'w') as tf:
+        for pfx in timeline.keys():
+            for r in timeline[pfx]:
+                # r = (day, prefix, as-path, routeObj or None, status)
+                # use RIPE_ROUTES_MATCH_LEGEND for status
 
+                if r[4] == 3: # not match
+                    tf.write('%s %s (%s) %s: ripe-db orig: %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]], str([ro.origin for ro in r[3]])))
+                elif r[4] == 4: # not found
+                    tf.write('%s %s (%s) %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]]))
+                else:
+                    raise Exception("Unexpected status: "+str(r[4]))
 
-
-
+            tf.write('\n--------------------------------------------------\n\n')
 
 # Module interface
 
@@ -359,7 +397,7 @@ def module_prepare(data_root_dir):
                 d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
                 out_days.append(d)
 
-                # skip parsed days (enumerate all needed results)
+                # skip parsed days (enumerate all needed results in condition)
                 if os.path.isfile(ripe_route_pickle(d)):
                     continue
 
@@ -368,11 +406,11 @@ def module_prepare(data_root_dir):
                 common.d("Resulting dir:", tmpdir)
                 try:
                     # ripe.db.route
-                    if os.path.isfile(ripe_routes_sourcef):
+                    if os.path.isfile(tmpdir+RIPE_DB_ROUTE):
                         ros=RouteObjectDir(tmpdir+RIPE_DB_ROUTE, False)
                         common.save_pickle(ros, ripe_route_pickle(d))
                     else:
-                        raise Exception("Missing file "+ripe_routes_sourcefile)
+                        raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTE)
 
                     # TODO: Create directories for AutNums && InetNums && AS-Sets
 
@@ -389,15 +427,20 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
     common.d("rpsl.module_run bgp_days:", bgp_days)
 
     route_totals=[]
+    route_violators={}
     for d in ripe_days:
         if d in bgp_days: # test if we have BGP data for the day
             res=None
             bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
             if not os.path.isfile(bgp2routesfn):
-                res=check_ripe_routes(d, ianadir, host, bgp_days, ipv6, True)
+                res=list(check_ripe_routes(d, ianadir, host, bgp_days, ipv6, True))
                 common.save_pickle(res, bgp2routesfn)
             else:
                 res=common.load_pickle(bgp2routesfn)
+
+            for v in ripe_filter_violating_routes(res):
+                if not v in route_violators:
+                    route_violators[v]=True
 
             route_totals.append(report_ripe_routes_day(res, d, common.resultdir(d), ipv6))
 
@@ -411,8 +454,11 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
         common.d("Generating graph with pfx", common.resultdir()+'/bgp2routes'+('6' if ipv6 else '4'))
         graph.gen_multilineplot(route_totals, common.resultdir()+'/bgp2routes'+('6' if ipv6 else '4'), legend=RIPE_ROUTES_MATCH_LEGEND)
 
-    #TODO:
-    #revisit common.resultdir(d)+RIPE_BGP2ROUTES_PICKLE for each day and cross check time to fix
+    # Revisit common.resultdir(d)+RIPE_BGP2ROUTES_PICKLE for each day and cross check time to fix
+    if route_violators:
+        common.d("Crating route timeline...")
+        tl=ripe_gen_route_timeline(route_violators.keys(), ripe_days, bgp_days, ipv6)
+        report_route_timeline(tl, ipv6)
 
 
 
