@@ -26,6 +26,7 @@ import graph
 import ianaspace
 import bgp
 
+# Constants
 
 RIPE_DB_ROUTE='/ripe.db.route'
 RIPE_DB_ROUTE_PICKLE='/ripe.route.pickle'
@@ -37,6 +38,9 @@ RIPE_BGP2ROUTES6_PICKLE='/bgp2routes.pickle'
 
 RIPE_ROUTE_VIOLATION_TIMELINE='/route_violations_timeline.txt'
 RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
+
+
+# Data model
 
 class RpslObject(object):
     def __init__(self,textlines):
@@ -154,13 +158,103 @@ class RouteObjectDir(object):
 
 
 class AutNumObject(RpslObject):
+    AUTNUM_ATTR='aut-num'
+    IMPORT_ATTR='import'
+    EXPORT_ATTR='export'
+    MP_IMPORT_ATTR='mp-import'
+    MP_EXPORT_ATTR='mp-export'
+
+    @staticmethod
+    def _decodeRule(rule):
+        # TODO
+        return str(rule)
+    
     def __init__(self,textlines):
-        pass
+        RpslObject.__init__(self,textlines)
+        self.aut_num=-1
+        self.import_list=[]
+        self.export_list=[]
+        self.mp_import_list=[]
+        self.mp_export_list=[]
+
+        for (a,v) in self.splitLines():
+            if a==self.AUTNUM_ATTR:
+                if v.lower()[0:2] == 'as':
+                    self.aut_num=int(v[2:].strip())
+                else:
+                    raise Exception('Can not parse aut-num line: '+str((a,v)))
+            elif a==self.IMPORT_ATTR:
+                self.import_list.append(AutNumObject._decodeRule(v))
+
+            elif a==self.EXPORT_ATTR:
+                self.export_list.append(AutNumObject._decodeRule(v))
+
+            elif a==self.MP_IMPORT_ATTR:
+                self.mp_import_list.append(AutNumObject._decodeRule(v))
+
+            elif a==self.MP_EXPORT_ATTR:
+                self.mp_export_list.append(AutNumObject._decodeRule(v))
+                
+            else:
+                pass # ignore unrecognized lines
+
+        if not self.aut_num>=0:
+            raise Exception("Can not create AutNumObject out of text: "+str(textlines))
+
+    def __str__(self):
+        return '''AutNumObject: AS%d
+import: %s
+export: %s
+mp-import: %s
+mp-export: %s
+-----------------
+'''%(self.aut_num, self.import_list, self.export_list, self.mp_import_list, self.mp_export_list)
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class AsSetObject(RpslObject):
+    ASSET_ATTR='as-set'
+    MEMBERS_ATTR='members'
+
+    @staticmethod
+    def _parseMembers(members):
+        for m in members.strip().split(','):
+            yield m.strip()
+    
+    def __init__(self,textlines):
+        RpslObject.__init__(self,textlines)
+        self.as_set=None
+        self.members=[]
+
+        for (a,v) in self.splitLines():
+            if a==self.ASSET_ATTR:
+                self.as_set=v.strip()
+                
+            elif a==self.MEMBERS_ATTR:
+                # flatten the list in case we have this:
+                # members: AS123, AS456, AS-SOMETHING
+                # members: AS234, AS-SMTHNG
+                for m in AsSetObject._parseMembers(v):
+                    self.members.append(m)
+
+            else:
+                pass # ignore unrecognized lines
+
+        if not self.as_set:
+            raise Exception("Can not create AsSetObject out of text: "+str(textlines))
+
+    def __str__(self):
+        return 'AsSetbject: %s -< %s\n'%(self.as_set, str(self.members))
+
+    def __repr__(self):
+        return self.__str__()
 
 
 
-
-
+class AsObjectDir(object):
+    pass
 
 
 
@@ -466,12 +560,22 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
 # Unit test interface
 
 def main():
-    raise Exception("This test does not work unless special environment is set.")
+#    raise Exception("This test does not work unless special environment is set.")
 
-    ripeRoutes=RouteObjectDir("/tmp/bgpcrunchVs4aOl"+"/ripe.db.route", False)
-    # ripeRoutes.tree.dump()
-    print str(ripeRoutes.getRouteObjs("2.10.0.0/16"))
-    return
+#    ripeRoutes=RouteObjectDir("/home/brill/test"+"/ripe.db.route", False)
+#    # ripeRoutes.tree.dump()
+#    print str(ripeRoutes.getRouteObjs("2.10.0.0/16"))
+#    return
+
+#    ripeAutNums=RpslObject.parseRipeFile('/home/brill/test'+'/ripe.db.aut-num', AutNumObject)
+#    for autnum in ripeAutNums:
+#        print str(autnum)
+#    return
+
+    ripeAsSets=RpslObject.parseRipeFile('/home/brill/test'+'/ripe.db.as-set', AsSetObject)
+    for asset in ripeAsSets:
+        print str(asset)
+
 
 
 if __name__ == '__main__':
