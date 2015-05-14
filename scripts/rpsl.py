@@ -20,6 +20,8 @@
 import re
 import sys
 import os
+import traceback
+import threading
 
 import common
 import graph
@@ -28,13 +30,31 @@ import bgp
 
 # Constants
 
+MAX_THREADS=3
+
 RIPE_DB_ROUTE='/ripe.db.route'
+RIPE_DB_ROUTE6='/ripe.db.route6'
+RIPE_DB_AUTNUM='/ripe.db.aut-num'
+RIPE_DB_ASSET='/ripe.db.as-set'
+RIPE_DB_FILTERSET='/ripe.db.filter-set'
+RIPE_DB_ROUTESET='/ripe.db.route-set'
+
 RIPE_DB_ROUTE_PICKLE='/ripe.route.pickle'
 RIPE_DB_ROUTE6_PICKLE='/ripe.route6.pickle'
+RIPE_DB_AUTNUM_PICKLE='/ripe.autnum.pickle'
+RIPE_DB_ASSET_PICKLE='/ripe.asset.pickle'
+RIPE_DB_FILTERSET_PICKLE='/ripe.filterset.pickle'
+RIPE_DB_ROUTESET_PICKLE='/ripe.routeset.pickle'
+
 RIPE_BGP2ROUTES4_TXT='/bgp2routes.txt'
 RIPE_BGP2ROUTES4_PICKLE='/bgp2routes.pickle'
 RIPE_BGP2ROUTES6_TXT='/bgp2routes.txt'
 RIPE_BGP2ROUTES6_PICKLE='/bgp2routes.pickle'
+
+RIPE_BGP2PATHS4_TXT='/bgp2paths.txt'
+RIPE_BGP2PATHS4_PICKLE='/bgp2paths.pickle'
+RIPE_BGP2PATHS6_TXT='/bgp2paths6.txt'
+RIPE_BGP2PATHS6_PICKLE='/bgp2paths6.pickle'
 
 RIPE_ROUTE_VIOLATION_TIMELINE='/route_violations_timeline.txt'
 RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
@@ -46,35 +66,58 @@ class RpslObject(object):
     def __init__(self,textlines):
         self.text=textlines
 
-    def splitLines(self):
+    def __repr__(self):
+        return self.__str__()
+
+    def getKey(self):
+        """
+        Returns key value that should correspond to the object key in RPSL standard view.
+        It is here for common HashObjectDirectory to use it for constructing lookup table.
+        """
+        raise Exception("This is abstract object. Dunno what my key is!")
+
+    
+    @staticmethod
+    def cleanupLines(text):
+        for l in text:           
+            # Discard comments
+            c = l.find('#')
+            if c > -1:
+                l = l[:c]
+
+            # Discard empty lines
+            if len(l.strip()) == 0:
+                continue
+
+            # Discard RIPE DB comments
+            if l[0] == '%':
+                continue
+
+            yield l.upper()
+        
+    
+    @staticmethod
+    def splitLines(text):
         """ Returns generator of tuples (attribute,value) and discards comments. """
 
         buf=('','')
-        for l in self.text:
-            # Discard comments
-            c = l.find('#')
-            if c >= 0:
-                l = l[:c]
-
-            if l.strip() == '':
-                continue
-
-            if buf:
-                if not (l[0].isspace() or l[0]=='+' ):
-                    yield buf
-                else:
+        for l in text:           
+            if buf[0]:
+                if l[0].isspace() or l[0]=='+':
                     buf=(buf[0],str(buf[1]+' '+l[1:].strip()).strip())
                     continue
-
+                else:
+                    yield buf
 
             # Find attr and value
             gr=l.strip().split(':',1)
-            if len (gr) != 2:
+            if len(gr) != 2:
                 raise Exception("Can not parse line: "+l)
 
             buf=(gr[0].strip(), gr[1].strip())
 
-        yield buf
+        if len(buf[0].strip())>0:
+            yield buf
 
     @staticmethod    
     def parseRipeFile(filename, targetClass):
@@ -83,10 +126,9 @@ class RpslObject(object):
         has to be created. """
         def flushrobj(ot):
             if ot:
-                try:
-                    return targetClass(ot)
-                except Exception as e:
-                    common.w("Object parse exception: "+str(e))
+                otl = list(RpslObject.cleanupLines(ot))
+                if otl:
+                    return targetClass(otl)
     
         with open(filename, 'r') as sf:
             objecttext=[]
@@ -106,41 +148,68 @@ class RpslObject(object):
                 yield o
 
 
+
+
+
+# Route object machinery
+
 class RouteObject(RpslObject):
-    ROUTE_ATTR = 'route'
-    ORIGIN_ATTR = 'origin'
+    """ Internal representation of route RPSL object. """
+    
+    ROUTE_ATTR = 'ROUTE'
+    ORIGIN_ATTR = 'ORIGIN'
     def __init__(self,textlines):
         RpslObject.__init__(self,textlines)
         self.route=None
         self.origin=None
 
-        for (a,v) in self.splitLines():
+        for (a,v) in RpslObject.splitLines(self.text):
             if a==self.ROUTE_ATTR:
-                self.route=v
+                self.route=v.strip()
             elif a==self.ORIGIN_ATTR:
-                if v.lower()[:2] == 'as':
-                    self.origin=int(v[2:].strip())
+                if v.upper()[:2] == 'AS':
+                    self.origin=v.strip()
                 else:
                     raise Exception("Can not parse tuple "+a+":"+v)
 
-            # TODO: Add holes
+            # TODO???: Add holes
             if self.route and self.origin:
                 break
 
         if not (self.route and self.origin):
             raise Exception("Can not create RouteObject out of text: "+str(textlines))
 
+    def getKey(self):
+        return self.route.upper()
+
     def __str__(self):
         return 'RouteObject: '+str(self.route)+'->'+str(self.origin)
 
-    def __repr__(self):
-        return self.__str__()
+
+class Route6Object(RouteObject):
+    """ Internal representation of route6 RPSL object. """
+
+    # inherit route object and change ongly the key attribute indicator
+    ROUTE_ATTR='ROUTE6'
+
 
 
 class RouteObjectDir(object):
+    """
+    Special directory for route and route6 objects. Fast IP address lookup
+    support is needed here as well as support for route/route6 object semantics
+    binding one route to multiple origin ASes as well as having a collection of
+    multiple routes for one AS. Lookups are possible in both direction using
+    IPLookupTree in one (IP prefix -> list of route objects) and hash table in the
+    other (origin -> list of route objects).
+    """
+
     def __init__(self,filename,ipv6=False):
         self.originTable={}
-        self._initTreeAndTable(RpslObject.parseRipeFile(filename,RouteObject),ipv6)
+        if ipv6:
+            self._initTreeAndTable(RpslObject.parseRipeFile(filename, Route6Object), ipv6)
+        else:
+            self._initTreeAndTable(RpslObject.parseRipeFile(filename, RouteObject), ipv6)
 
     def _initTreeAndTable(self,routeobjects,ipv6):
         """ routeobjects is supposedly a generator... """
@@ -157,80 +226,318 @@ class RouteObjectDir(object):
 
 
 
-class AutNumObject(RpslObject):
-    AUTNUM_ATTR='aut-num'
-    IMPORT_ATTR='import'
-    EXPORT_ATTR='export'
-    MP_IMPORT_ATTR='mp-import'
-    MP_EXPORT_ATTR='mp-export'
+
+
+
+# Aut-num object machinery
+
+EXPRESSION_DECODE=re.compile('^([^\{\}]+|\{([^\{\}]+)\}(\s+refine .*|\s+except .*)?)$')
+FACTOR_SPLIT_FROM='from'
+FACTOR_SPLIT_TO='to'
+AFI_MATCH=re.compile('^afi\s+([^\s]+)\s+(.*)$')
+IMPORT_FACTOR_MATCH=re.compile('^FROM\s+([^s]+)\s+.*\s+ACCEPT\s+(.+)$')
+EXPORT_FACTOR_MATCH=re.compile('^TO\s+([^s]+)\s+.*\s+ANNOUNCE\s+(.+)$')
+DEFAULT_FACTOR_MATCH=re.compile('^TO\s+([^s]+)\s+.*\s+NETWORKS\s+(.+)$')
+class AutNumRule(object):
+    """ Abstract base for internal representation of a rule in an aut-num object.
+    """
+
+    def __init__(self, line, mp=False):
+        """
+        line = the rule text (value)
+        mp = mutli-protocol rule (according RFC 4012)
+        """
+
+        self.mp = mp
+        self.text = line
+
+    def __str__(self):
+        return "%s%s : %s"%(self.__class__.__name__, (' MP' if self.mp else ''), self.text)
+
+    def __repr__(self):
+        return self.__str__()
 
     @staticmethod
-    def _decodeRule(rule):
-        # TODO
-        return str(rule)
+    def _decomposeExpression(text):
+        # split line to { factor1; factor2; ... } and the rest (refinements etc)
+        m=EXPRESSION_DECODE.match(text)
+
+        if m and m.group(2):
+            # ignore refinements and excepts and count on case insensitivity of RPSL
+            e=m.group(2).strip().upper()
+
+            if e.match(FACTOR_SPLIT_FROM)>-1:
+                return [str('from'+f).strip() for f in e.split(FACTOR_SPLIT_FROM)[1:]]
+
+            elif e.find(FACTOR_SPLIT_TO)>-1:
+                return [str('to'+f).strip() for f in e.split(FACTOR_SPLIT_TO)[1:]]
+            
+            else:
+                raise Exception("Can not find factors in: "+e)
+                
+        else:
+            raise Exception("Can note split expression: "+text)
+
+    @staticmethod
+    def _normalizeFactor(factor):
+        """
+        Returns (subject, filter) where subject is AS or AS-SET and
+        filter is a filter. For example in factor:
+        "to AS1234 announce AS-SECRETNET" : the subject is AS1234 and
+        the filter is the AS-SECRETNET; the same for factor:
+        "from AS1234 accept ANY": the subject is AS1234 and the filter
+        is ANY and the same for default factors like the following:
+        "to AS1234 networks ANY"
+        """
+
+        factor=factor.strip().upper()
+        if factor[-1] == ';':
+            factor=factor[:-1].strip()
+
+        m=IMPORT_FACTOR_MATCH.match(factor)
+        if m and m.group(1) and m.group(2):
+            return (m.group(1),m.group(2))
+
+        m=EXPORT_FACTOR_MATCH.match(factor)
+        if m and m.group(1) and m.group(2):
+            return (m.group(1),m.group(2))
+
+        m=DEFAULT_FACTOR_MATCH.match(factor)
+        if m and m.group(1) and m.group(2):
+            return (m.group(1),m.group(2))
+
+        raise Exception("Can not parse factor: "+factor)
+
+
+    def _parseRule(self):
+        """
+        Returns (afi, [(subject, filter)]). Remove all refine and except blocks
+        as well as protocol and to specs.
+
+        The (subject, filter) are taken from factors where subject is
+        AS or AS-SET and filter is a filter string. For example in factor:
+        "to AS1234 announce AS-SECRETNET" : the subject is AS1234 and
+        the filter is the AS-SECRETNET; the same for factor:
+        "from AS1234 accept ANY": the subject is AS1234 and the filter
+        is ANY.
+
+        afi is by default ipv4.unicast. For MP rules it is being parsed and
+        filled in according to the rule content.
+        """
+
+        afi='ipv4.unicast'
+        if self.mp:
+            r=AFI_MATCH.match(self.text)
+            if r:
+                afi=r.group(1)
+                e=r.group(1)
+            else:
+                raise Exception("Can not match AFI in MP rule: "+self.text)
+
+        factors=AutNumRule._decomposeExpression(self.text)
+
+        return (afi,[AutNumRule._normalizeFactor(f) for f in factors])
+
+
+    def match(subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False):
+        """
+        Interpret the rule and decide whether a prefix should be accepted or not.
+
+        subject = AS that is announcing the prefix to or as that the prefix is exported to by
+        the AS that conains this rule
+        prefix = prefix that is in question
+        currentAsPath = aspath as it is (most likely) seen by the AS
+        assetDirectory = HashObjectDir that conains the AsSetObjects
+        fltrsetDirectory = HashObjectDir that conains the FilterSetObjects
+        rtsetDirectory = HashObjectDir that conains the RouteSetObjects
+        ipv6 = matching IPv6 route?
+        """
+
+        def isASN(asn):
+            return str(asn).upper()[:2] == 'AS'
+
+        def matchFilter(factor, prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6=False):
+            # TODO
+            return True
+
+        # Fast-path, fail for IPv6 with non-MP rule
+        # This is problematic... A lot of people does not have proper
+        # routing politics written with mp-* rules and people
+        # just freely intepret the aut-num objects as being multi-protocol
+        # by default. (Which is not true...)
+        if (not self.mp) and ipv6:
+            return False
+
+        res=self._parseRule() # (afi, [(subject, filter)])
+
+        # Check address family matches
+        if res[0] != 'any' and res[0] != 'any.unicast':
+            if ((ipv6 and res[0] != 'ipv6.unicast') or
+            ((not ipv6) and res[0] != 'ipv4.unicast')):
+                return False
+
+        # Walk through factors and find whether there is subject match,
+        # run the filter if so
+        for f in res[1]:
+            if isASN(f[0]):
+                if f[0] == subject:
+                    return matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
+
+            elif AsSetObject.isAsSet(f[0]):
+                if f[0] in assetDirectory.table:
+                    if assetDirectory.table[f[0]].matchRecursive(subject.upper()):
+                        return matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
+
+            else:
+                raise Exception("Can not expand subject: "+str(f[0]))
+
+        # No match of factor means that the prefix should not appear
+        return False
+
+    
+
+class AutNumImportRule(AutNumRule):
+    """ Internal representation of a rule (=import, mp-import line)
+    in an aut-num object.
+    """
+
+    def __init__(self, line, mp=False):
+        """
+        line = the rule text (value)
+        mp = mutli-protocol rule (according RFC 4012)
+        """
+        AutNumRule.__init__(self, line, mp)
+
+
+
+class AutNumDefaultRule(AutNumRule):
+    """ Internal representation of a default rule (=default, mp-default line)
+    in an aut-num object.
+    """
+
+    def __init__(self, line, mp=False):
+        """
+        line = the rule text (value)
+        mp = mutli-protocol rule (according RFC 4012)
+        """
+        AutNumRule.__init__(self, line, mp)
+
+
+
+
+class AutNumExportRule(AutNumRule):
+    """ Internal representation of a rule (=export, or mp-export line)
+    in an aut-num object.
+    """
+
+    def __init__(self, line, mp=False):
+        """
+        line = the rule text (value)
+        mp = mutli-protocol rule (according RFC 4012)
+        """
+        AutNumRule.__init__(self, line, mp)
+
+############################################
+
+
+
+
+class AutNumObject(RpslObject):
+    """ Internal representation of aut-num RPSL object. """
+    
+    AUTNUM_ATTR='AUT-NUM'
+    IMPORT_ATTR='IMPORT'
+    EXPORT_ATTR='EXPORT'
+    MP_IMPORT_ATTR='MP-IMPORT'
+    MP_EXPORT_ATTR='MP-EXPORT'
+    DEFAULT_ATTR="DEFAULT"
+    MP_DEFAULT_ATTR="MP-DEFAULT"
     
     def __init__(self,textlines):
         RpslObject.__init__(self,textlines)
-        self.aut_num=-1
+        self.aut_num=None
         self.import_list=[]
         self.export_list=[]
         self.mp_import_list=[]
         self.mp_export_list=[]
 
-        for (a,v) in self.splitLines():
+        for (a,v) in RpslObject.splitLines(self.text):
             if a==self.AUTNUM_ATTR:
-                if v.lower()[0:2] == 'as':
-                    self.aut_num=int(v[2:].strip())
+                if v.upper()[0:2] == 'AS':
+                    self.aut_num=v.strip().upper()
                 else:
                     raise Exception('Can not parse aut-num line: '+str((a,v)))
             elif a==self.IMPORT_ATTR:
-                self.import_list.append(AutNumObject._decodeRule(v))
+                self.import_list.append(AutNumImportRule(v))
+
+            elif a==self.DEFAULT_ATTR:
+                self.import_list.append(AutNumDefaultRule(v))
 
             elif a==self.EXPORT_ATTR:
-                self.export_list.append(AutNumObject._decodeRule(v))
+                self.export_list.append(AutNumExportRule(v))
 
             elif a==self.MP_IMPORT_ATTR:
-                self.mp_import_list.append(AutNumObject._decodeRule(v))
+                self.mp_import_list.append(AutNumImportRule(v, True))
+
+            elif a==self.MP_DEFAULT_ATTR:
+                self.mp_import_list.append(AutNumDefaultRule(v, True))
 
             elif a==self.MP_EXPORT_ATTR:
-                self.mp_export_list.append(AutNumObject._decodeRule(v))
+                self.mp_export_list.append(AutNumExportRule(v, True))
                 
             else:
                 pass # ignore unrecognized lines
 
-        if not self.aut_num>=0:
+        if self.aut_num == None:
             raise Exception("Can not create AutNumObject out of text: "+str(textlines))
 
+
+    def getKey(self):
+        return 'AS%d'%self.aut_num
+
+
     def __str__(self):
-        return '''AutNumObject: AS%d
+        return '''AutNumObject: %s
 import: %s
 export: %s
 mp-import: %s
 mp-export: %s
 -----------------
-'''%(self.aut_num, self.import_list, self.export_list, self.mp_import_list, self.mp_export_list)
+'''%(self.aut_num, self.import_list, self.export_list, self.mp_import_list,
+     self.mp_export_list)
 
-    def __repr__(self):
-        return self.__str__()
 
+
+
+
+
+# Set-* objects
 
 class AsSetObject(RpslObject):
-    ASSET_ATTR='as-set'
-    MEMBERS_ATTR='members'
+    """ Internal representation of as-set RPSL object. """
+
+    ASSET_ATTR='AS-SET'
+    MEMBERS_ATTR='MEMBERS'
 
     @staticmethod
     def _parseMembers(members):
         for m in members.strip().split(','):
-            yield m.strip()
+            yield m.strip().upper()
+
+    @staticmethod
+    def isAsSet(name):
+        """ Returs True when the name appears to be as-set name (=key)
+        according to RPSL specs. """
+        return str(name).upper().find('AS-') > -1
     
     def __init__(self,textlines):
         RpslObject.__init__(self,textlines)
         self.as_set=None
         self.members=[]
 
-        for (a,v) in self.splitLines():
+        for (a,v) in RpslObject.splitLines(self.text):
             if a==self.ASSET_ATTR:
-                self.as_set=v.strip()
+                self.as_set=v.strip().upper()
                 
             elif a==self.MEMBERS_ATTR:
                 # flatten the list in case we have this:
@@ -245,17 +552,136 @@ class AsSetObject(RpslObject):
         if not self.as_set:
             raise Exception("Can not create AsSetObject out of text: "+str(textlines))
 
+
+    def getKey(self):
+        return self.as_set
+
+    def recursiveMatch(self, target, hashObjDir, recursionList=[]):
+        # prevent recusion loop
+        if self.getKey() in recursionList:
+            return False
+        recursionList.append(self.getKey())
+        
+        if target in self.members:
+            return True
+
+        for m in members:
+            if isAsSet(m) and m in hashObjDir.table:
+                r = hashObjDir.table[m].recursiveMatch(target, hashObjDir, recursionList)
+                if r:
+                    return True
+
+        return False
+
     def __str__(self):
-        return 'AsSetbject: %s -< %s\n'%(self.as_set, str(self.members))
-
-    def __repr__(self):
-        return self.__str__()
+        return 'AsSetbject: %s -< %s'%(self.as_set, str(self.members))
 
 
 
-class AsObjectDir(object):
-    pass
 
+class FilterSetObject(RpslObject):
+    """ Internal representation of filter-set RPSL object. """
+
+    FILTERSET_ATTR='FILTER-SET'
+    FILTER_ATTR='FILTER'
+    MP_FILTER_ATTR="MP-FILTER"
+
+    def __init__(self,textlines):
+        RpslObject.__init__(self,textlines)
+        self.filter_set=None
+        self.filter=None
+        self.mp_filter=None
+
+        for (a,v) in RpslObject.splitLines(self.text):
+            if a==self.FILTERSET_ATTR:
+                self.filter_set=v.strip().upper()
+                
+            elif a==self.FILTER_ATTR:
+                self.filter=v.strip()
+
+            elif a==self.MP_FILTER_ATTR:
+                self.mp_filter=v.strip()
+
+            else:
+                pass # ignore unrecognized lines
+
+        if not self.filter_set:
+            raise Exception("Can not create FilterSetObject out of text: "+str(textlines))
+
+
+    def getKey(self):
+        return self.filter_set
+
+    def __str__(self):
+        f=None
+        if self.filter:
+            f=str(self.filter)
+        if self.mp_filter:
+            if f:
+                f+=' + '
+            else:
+                f=''
+            f+=str(self.mp_filter)
+        return 'FilterSetbject: %s -< %s'%(self.filter_set, f)
+
+    def match(self, prefix, originAS):
+        # TODO
+        return True
+
+class RouteSetObject(RpslObject):
+    """ Internal representation of route-set RPSL object. """
+
+    ROUTESET_ATTR='ROUTE-SET'
+    MEMBERS_ATTR='MEMBERS'
+    MP_MEMBERS_ATTR="MP-MEMBERS"
+
+    def __init__(self,textlines):
+        RpslObject.__init__(self,textlines)
+        self.route_set=None
+        self.members=[]
+        self.mp_members=[]
+
+        for (a,v) in RpslObject.splitLines(self.text):
+            if a==self.ROUTESET_ATTR:
+                self.route_set=v.strip().upper()
+                
+            elif a==self.MEMBERS_ATTR:
+                self.members.append(v.strip().upper())
+
+            elif a==self.MP_MEMBERS_ATTR:
+                self.mp_members.append(v.strip().upper())
+
+            else:
+                pass # ignore unrecognized lines
+
+        if not self.route_set:
+            raise Exception("Can not create RouteSetObject out of text: "+str(textlines))
+
+
+    def getKey(self):
+        return self.route_set
+
+    def __str__(self):
+        return 'RouteSetbject: %s -< %s + %s'%(self.route_set, str(self.members), str(self.mp_members))
+
+
+    def match(self, prefix):
+        # TODO
+        return True
+
+
+class HashObjectDir(object):
+    """
+    Common direcotry for objects that have one unique key and unlike route or route6
+    objects do not need special lookup machinery because of their semantics.
+    Once the object is constructed (out of a RIPE DB snapshot file) it contains
+    table attribute, which is a hastable with keys that uses getKey() of the objects
+    to index them.
+    """
+    def __init__(self, filename, objType):
+        self.table={}
+        for o in RpslObject.parseRipeFile(filename, objType):
+            self.table[o.getKey()]=o
 
 
 
@@ -269,6 +695,18 @@ def ripe_route_pickle(day):
 
 def ripe_route6_pickle(day):
     return common.resultdir(day)+RIPE_DB_ROUTE6_PICKLE
+
+def ripe_autnum_pickle(day):
+    return common.resultdir(day)+RIPE_DB_AUTNUM_PICKLE
+
+def ripe_asset_pickle(day):
+    return common.resultdir(day)+RIPE_DB_ASSET_PICKLE
+
+def ripe_filterset_pickle(day):
+    return common.resultdir(day)+RIPE_DB_FILTERSET_PICKLE
+
+def ripe_routeset_pickle(day):
+    return common.resultdir(day)+RIPE_DB_ROUTESET_PICKLE
 
 
 def decode_ripe_tgz_filename(filename):
@@ -288,7 +726,7 @@ def decode_ripe_tgz_filename(filename):
 
 
 
-# Checking code
+# Route checking code
 
 def check_ripe_route(path_vector, iana_dir, ripe_routes):
     """
@@ -301,8 +739,8 @@ def check_ripe_route(path_vector, iana_dir, ripe_routes):
     # assert...
     if not path_vector[1].find('/')>0:
         raise Exception("Pfx not normalized: "+str(path_vector))
-        ################
 
+    # check the prefix is not an aggregate
     if len(path_vector[3].split(' '))>=2:
         orig=path_vector[3].split(' ')[-2]
         if orig.find("{")>=0:
@@ -322,7 +760,7 @@ def check_ripe_route(path_vector, iana_dir, ripe_routes):
             for r in routes:
                 if r.origin == int(orig):
                     #common.d("Route object match for", path_vector[1], '('+path_vector[3]+"):", str(r))
-                    return (path_vector[1], [path_vector[3]], r, 0)
+                    return (path_vector[1], path_vector[3], r, 0)
                 else:        
                     #common.d("Route object NOT match", str(r.route), "("+str(r.origin)+") found for", str(pv[1]), "from AS"+str(orig))
                     notmatchro.append(r)
@@ -337,7 +775,7 @@ def check_ripe_route(path_vector, iana_dir, ripe_routes):
 
 
 
-def check_ripe_routes(day, ianadir, host, bgp_days, ipv6=False, bestonly=True):
+def check_ripe_routes(day, ianadir, host, ipv6=False, bestonly=True):
     """
     Check routes from BGP dump against RIPE route objects. Ignore all routes
     from the BGP dump that are either from outside of the RIPE region or
@@ -481,36 +919,265 @@ def report_route_timeline(timeline, ipv6=False):
 
             tf.write('\n--------------------------------------------------\n\n')
 
+
+# Path checking code
+
+def normalize_aspath(text):
+    text = text.replace('{', '').replace('}', '')
+    asns = text.split()[:-1]
+    return ['AS'+asn for asn in asns]
+
+
+def check_ripe_path_step(pfx, asn, cueernt_aspath, previous_as, next_as,
+                         autnum_dir, asset_dir, routeset_dir, ipv6=False):
+    """ TODO desc """
+
+    if asn in autnum_dir.table:
+        autnum=autnum_dir.table[asn]
+        import_match=False
+        export_match=False
+        
+        for ir in autnum.import_list:
+            if ir.match(previous_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6):
+                import_match=True
+                break
+
+        for ir in autnum.mp_import_list:
+            if ir.match(previous_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6):
+                import_match=True
+                break
+
+        if not import_match:
+            return 3 # import match missing
+
+        for er in autnum.export_list:
+            if er.match(next_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6):
+                export_match=True
+                break
+
+        for er in autnum.mp_export_list:
+            if er.match(next_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6):
+                export_match=True
+                break
+
+        if not export_match:
+            return 4 # export match missing
+    else:
+        return 2 # ASN not in RIPE region (=not found in aut-num directory)
+
+    return 0 # otherwise it must have matched both import and export
+    
+
+
+def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6=False, myas=None):
+    """
+    TODO descr
+    """
+    
+    # assert...
+    if not path_vector[1].find('/')>0:
+        raise Exception("Pfx not normalized: "+str(path_vector))
+
+    aspath = normalize_aspath(path_vector[3])
+    status  = []
+    allinripe = True
+
+    
+    
+    # go through as-path one by one AS and check routes
+    for i,asn in enumerate(aspath):
+        previous_as = (aspath[i-1] if i>0 else myas)
+        if previous_as == None:
+            continue
+
+        next_as = (aspath[i+1] if i<(len(aspath)-1) else None)
+        
+        res = check_ripe_path_step(path_vector[1], asn, aspath[i:], previous_as, next_as,
+                                   autnum_dir, asset_dir, routeset_dir, ipv6)
+
+        if res == 2: # means that the ASN is out of RIPE region
+            allinripe = False
+
+        status.push((asn, res))
+
+    return (path_vector, allinripe, status)
+
+
+def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True):
+    """
+    Check paths during their travel in the RIPE region.
+    Returns (path_vector, whole_path_in_ripe, status, status_per_as) where
+    path_vector is BGP path vector from checked host table for the day,
+    whole_path_in_ripe indicates whether whole path is withing
+    RIPE region (= no AS in as-path lays outside of RIPE),
+    ...
+    status_per_as = list of check result statuses for each AS in as-path
+
+    status list:
+    0 = match (=OK)
+    1 = route uncheckable (local or aggregate... =uncheckable)
+    2 = ASN outside of RIPE NCC region (=uncheckable)
+    3 = prevASN not found
+    4 = nextASN not found (might be suppressed by the status=3 which has precedecnce
+    but the AS shoudl not export prefix that it didnt imported in documented way...)
+    5 = ??? TODO
+    """
+    # TODO. Plan:
+    # load BGP dump, aut-num, as-set and filter-set pickles
+    # pick routes that belongs to RIPE and verify route object by
+    # calling check_ripe_route(path_vector, iana_dir, ripe_routes)
+    # If the result is 0 (=OK) then start checking the as-path:
+    # for each AS from the right (= from beginning) find it's
+    # aut-num object and check that it is being originated locally for
+    # the first one or imported from right and expoted to the left.
+    # The only exception is the last AS that does not need to export.
+    # Drawback: It does not check the last AS in the path.
+    # So add the own-AS external fed variable???
+
+    common.d("Checking RIPE paths against aut-num & sets objects for day", day)
+
+    res=[]
+
+    # Load data for a day
+    riperoutes_pkl=(ripe_route6_pickle(day) if ipv6 else ripe_route_pickle(day))
+    riperoutes=common.load_pickle(riperoutes_pkl)
+
+#    route_dir_pkl = ripe_route6_pickle(d) if ipv6 else ripe_route_pickle(d)
+#    route_dir = common.load_pickle(route_dir_pkl)
+
+    asset_dir = common.load_pickle(ripe_asset_pickle(d))
+    autnum_dir = common.load_pickle(ripe_autnum_pickle(d))
+    filterset_dir = common.load_pickle(ripe_filterset_pickle(d))
+    routeset_dir = common.load_pickle(ripe_routeset_pickle(d))
+
+    bgpdump=common.load_pickle(bgp.bgpdump_pickle(day, host, ipv6))
+
+    # Run the check for BGP data of the day
+    for path_vector in bgpdump:
+        if bestonly and not (path_vector[0] and '>' in path_vector[0]):
+            continue
+
+        rc = check_ripe_route(path_vector, ianadir, riperoutes)
+        if rc[3] == 0 or rc[3] == 5: # if the route checks in RIPE DB or it is outside of RIPE region
+            yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6)
+        else:
+            common.d("origin does not match... no point in checkign the path", path_vector)
+            status  = [(asn, 0) for asn in normalize_aspath(path_vector[3])]
+            status[-1] = (status[-1][-1], 1) # 1=route object failure or uncheckable route,
+            # either local route or aggregate route generated in some remote location
+            yield (path_vector, True, status)
+
+
+
+
+def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
+    # TODO
+    return ()
+
+
+
+def module_prepare_day(fn, d):
+    """
+    Prepare datastructures for RPS module for a day.
+    fn is a filename of the daily RIPE archive and d is a Day object
+    that represent the day.
+    """
+    
+    # skip parsed days (enumerate all needed results in condition)
+    if (os.path.isfile(ripe_route_pickle(d)) and
+        os.path.isfile(ripe_route6_pickle(d)) and
+        os.path.isfile(ripe_autnum_pickle(d)) and
+        os.path.isfile(ripe_asset_pickle(d)) and
+        os.path.isfile(ripe_filterset_pickle(d)) and
+        os.path.isfile(ripe_routeset_pickle(d))):
+        common.d("Skipping dir", d, "because we have all needed results.")
+        return
+
+    common.d("Unpacking file", fn, "for time", d, ".")
+    tmpdir=common.unpack_ripe_file(fn)
+    common.d("Resulting dir:", tmpdir)
+    try:
+        # ripe.db.route
+        common.d("Parsing", tmpdir+RIPE_DB_ROUTE)
+        if os.path.isfile(tmpdir+RIPE_DB_ROUTE):
+            ros=RouteObjectDir(tmpdir+RIPE_DB_ROUTE, False)
+            common.save_pickle(ros, ripe_route_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTE)
+
+        # ripe.db.route6
+        common.d("Parsing", tmpdir+RIPE_DB_ROUTE6)
+        if os.path.isfile(tmpdir+RIPE_DB_ROUTE6):
+            ros6=RouteObjectDir(tmpdir+RIPE_DB_ROUTE6, True)
+            common.save_pickle(ros6, ripe_route6_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE6_DB_ROUTE)
+                    
+        # ripe.db.aut-num
+        common.d("Parsing", tmpdir+RIPE_DB_AUTNUM)
+        if os.path.isfile(tmpdir+RIPE_DB_AUTNUM):
+            ao=HashObjectDir(tmpdir+RIPE_DB_AUTNUM, AutNumObject)
+            common.save_pickle(ao, ripe_autnum_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE_DB_AUTNUM)
+
+        # ripe.db.as-set
+        common.d("Parsing", tmpdir+RIPE_DB_ASSET)
+        if os.path.isfile(tmpdir+RIPE_DB_ASSET):
+            ass=HashObjectDir(tmpdir+RIPE_DB_ASSET, AsSetObject)
+            common.save_pickle(ass, ripe_asset_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE_DB_ASSET)
+
+        # ripe.db.filter-set
+        common.d("Parsing", tmpdir+RIPE_DB_FILTERSET)
+        if os.path.isfile(tmpdir+RIPE_DB_FILTERSET):
+            fs=HashObjectDir(tmpdir+RIPE_DB_FILTERSET, FilterSetObject)
+            common.save_pickle(fs, ripe_filterset_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE_DB_FILTERSET)
+
+        # ripe.db.route-set
+        common.d("Parsing", tmpdir+RIPE_DB_ROUTESET)
+        if os.path.isfile(tmpdir+RIPE_DB_ROUTESET):
+            fs=HashObjectDir(tmpdir+RIPE_DB_ROUTESET, RouteSetObject)
+            common.save_pickle(fs, ripe_routeset_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTESET)
+
+    finally:
+        common.d("Removing dir", tmpdir, "expanded from", fn, "for time", d, ".")
+        common.cleanup_path(tmpdir)
+
+
+def module_prepare_thread(tasks):
+    for t in tasks:
+        module_prepare_day(t[0], t[1])
+
 # Module interface
 
 def module_prepare(data_root_dir):
         """ Prepare datastructures for RPSL module. """
         out_days = []
+        tasks = [[] for i in range(0,MAX_THREADS)]
 
-        for fn in common.enumerate_files(data_root_dir+'/ripe','ripedb-[0-9-]+\.tar\.bz2'):
-                d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
-                out_days.append(d)
+        for i,fn in enumerate(common.enumerate_files(data_root_dir+'/ripe','ripedb-[0-9-]+\.tar\.bz2')):
+            d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
+            out_days.append(d)
 
-                # skip parsed days (enumerate all needed results in condition)
-                if os.path.isfile(ripe_route_pickle(d)):
-                    continue
+            tasks[i%MAX_THREADS].append((fn,d))
 
-                common.d("Unpacking file", fn, "for time", d, ".")
-                tmpdir=common.unpack_ripe_file(fn)
-                common.d("Resulting dir:", tmpdir)
-                try:
-                    # ripe.db.route
-                    if os.path.isfile(tmpdir+RIPE_DB_ROUTE):
-                        ros=RouteObjectDir(tmpdir+RIPE_DB_ROUTE, False)
-                        common.save_pickle(ros, ripe_route_pickle(d))
-                    else:
-                        raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTE)
+        if MAX_THREADS > 1:
+            threads=[]
+            for i in range(0,MAX_THREADS):
+                t=threading.Thread(target=module_prepare_thread, args=[tasks[i]])
+                t.start()
+                threads.append(t)
 
-                    # TODO: Create directories for AutNums && InetNums && AS-Sets
-
-                finally:
-                        common.d("Removing dir", tmpdir, "expanded from", fn, "for time", d, ".")
-                        common.cleanup_path(tmpdir)
+            for t in threads:
+                t.join()
+        else: # no threading
+            module_prepare_thread(tasks[0])
 
         return out_days
 
@@ -522,12 +1189,14 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
 
     route_totals=[]
     route_violators={}
+    path_totals=[]
     for d in ripe_days:
         if d in bgp_days: # test if we have BGP data for the day
+            # check routes
             res=None
             bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
             if not os.path.isfile(bgp2routesfn):
-                res=list(check_ripe_routes(d, ianadir, host, bgp_days, ipv6, True))
+                res=list(check_ripe_routes(d, ianadir, host, ipv6, True))
                 common.save_pickle(res, bgp2routesfn)
             else:
                 res=common.load_pickle(bgp2routesfn)
@@ -538,7 +1207,15 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
 
             route_totals.append(report_ripe_routes_day(res, d, common.resultdir(d), ipv6))
 
-            # TODO check_paths
+            # check paths
+            bgp2pathsfn=common.resultdir(d)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
+            if not os.path.isfile(bgp2pathsfn):
+                res=list(check_ripe_paths(d, ianadir, host, ipv6, True))
+                common.save_pickle(res, bgp2pathsfn)
+            else:
+                res=common.load_pickle(bgp2pathsfn)
+
+            path_totals.append(report_ripe_paths_day(res, d, common.resultdir(d), ipv6))
 
         else:
              common.w('Missing BGP data for day %s'%str(d))
@@ -554,6 +1231,9 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
         tl=ripe_gen_route_timeline(route_violators.keys(), ripe_days, bgp_days, ipv6)
         report_route_timeline(tl, ipv6)
 
+    # TODO: Path totals
+
+
 
 
 
@@ -562,19 +1242,42 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
 def main():
 #    raise Exception("This test does not work unless special environment is set.")
 
-#    ripeRoutes=RouteObjectDir("/home/brill/test"+"/ripe.db.route", False)
-#    # ripeRoutes.tree.dump()
-#    print str(ripeRoutes.getRouteObjs("2.10.0.0/16"))
-#    return
+    def test_routes():
+        ripeRoutes=RouteObjectDir("/home/brill/ext/tmp/ripe.db.route", False)
+        # ripeRoutes.tree.dump()
+        print str(ripeRoutes.getRouteObjs("2.10.0.0/16"))
 
-#    ripeAutNums=RpslObject.parseRipeFile('/home/brill/test'+'/ripe.db.aut-num', AutNumObject)
-#    for autnum in ripeAutNums:
-#        print str(autnum)
-#    return
+        ripeRoutes=RouteObjectDir("/home/brill/ext/tmp/ripe.db.route6", True)
+        # ripeRoutes.tree.dump()
+        print str(ripeRoutes.getRouteObjs("2a00:1028::/32"))
 
-    ripeAsSets=RpslObject.parseRipeFile('/home/brill/test'+'/ripe.db.as-set', AsSetObject)
-    for asset in ripeAsSets:
-        print str(asset)
+
+    def test_autnums():
+        ripeAutNums=RpslObject.parseRipeFile('/home/brill/ext/tmp/ripe.db.aut-num', AutNumObject)
+        for autnum in ripeAutNums:
+            print str(autnum)
+
+    def test_assets():
+        ripeAsSets=RpslObject.parseRipeFile('/home/brill/ext/tmp/ripe.db.as-set', AsSetObject)
+        for asset in ripeAsSets:
+            print str(asset)
+
+    def test_fltrsets():
+        filterSets=RpslObject.parseRipeFile('/home/brill/ext/tmp/ripe.db.filter-set', FilterSetObject)
+        for fset in filterSets:
+            print str(fset)
+
+    def test_routesets():
+        routeSets=RpslObject.parseRipeFile('/home/brill/ext/tmp/ripe.db.route-set', RouteSetObject)
+        for rset in routeSets:
+            print str(rset)
+
+    test_routes()
+    test_autnums()
+    test_assets()
+    test_fltrsets()
+    test_routesets()
+
 
 
 
