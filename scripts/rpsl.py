@@ -30,6 +30,8 @@ import bgp
 
 # Constants
 
+MY_ASN=None # or 'AS29134'
+
 MAX_THREADS=3
 
 RIPE_DB_ROUTE='/ripe.db.route'
@@ -410,7 +412,7 @@ class AutNumRule(object):
         # Walk through factors and find whether there is subject match,
         # run the filter if so
         for f in res[1]:
-#            common.d("Match? sub=", subject, 'f=', str(f))
+            #common.d("Match? sub=", subject, 'f=', str(f))
 
             if isASN(f[0]):
                 if f[0] == subject:
@@ -1045,7 +1047,7 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
     return (path_vector, allinripe, status)
 
 
-def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True):
+def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None):
     """
     Check paths during their travel in the RIPE region.
     Returns (path_vector, whole_path_in_ripe, status, status_per_as) where
@@ -1101,11 +1103,12 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True):
 
         rc = check_ripe_route(path_vector, ianadir, riperoutes)
         if rc[3] == 0 or rc[3] == 5: # if the route checks in RIPE DB or it is outside of RIPE region
-            yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6)
+            yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6, myas)
         else:
-            common.d("origin does not match... no point in checking the path", path_vector)
+            common.d("Origin does not match... No point in checking the path.", path_vector)
             status  = [(asn, 0) for asn in normalize_aspath(path_vector[3])]
-            status[-1] = (status[-1][-1], 1) # 1=route object failure or uncheckable route,
+            if status:
+                status[-1] = (status[-1][-1], 1) # 1=route object failure or uncheckable route,
             # either local route or aggregate route generated in some remote location
             yield (path_vector, True, status)
 
@@ -1256,7 +1259,7 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
             bgp2pathsfn=common.resultdir(d)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
             if not os.path.isfile(bgp2pathsfn):
                 common.d("Creating file", bgp2pathsfn)
-                res=list(check_ripe_paths(d, ianadir, host, ipv6, True))
+                res=list(check_ripe_paths(d, ianadir, host, ipv6, True, MY_ASN))
                 common.save_pickle(res, bgp2pathsfn)
             else:
                 res=common.load_pickle(bgp2pathsfn)
