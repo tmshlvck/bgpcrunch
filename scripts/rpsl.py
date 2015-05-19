@@ -168,11 +168,13 @@ class RouteObject(RpslObject):
                 self.route=v.strip()
             elif a==self.ORIGIN_ATTR:
                 if v.upper()[:2] == 'AS':
-                    self.origin=v.strip()
+                    self.origin=v.strip().upper()
                 else:
                     raise Exception("Can not parse tuple "+a+":"+v)
 
-            # TODO???: Add holes
+            # TODO???: Add holes. But why? It is impossible to check hole existence at
+            # this point. New module and new walk through is needed perhaps.
+
             if self.route and self.origin:
                 break
 
@@ -231,13 +233,17 @@ class RouteObjectDir(object):
 
 # Aut-num object machinery
 
-EXPRESSION_DECODE=re.compile('^([^\{\}]+|\{([^\{\}]+)\}(\s+refine .*|\s+except .*)?)$')
-FACTOR_SPLIT_FROM='from'
-FACTOR_SPLIT_TO='to'
-AFI_MATCH=re.compile('^afi\s+([^\s]+)\s+(.*)$')
-IMPORT_FACTOR_MATCH=re.compile('^FROM\s+([^s]+)\s+.*\s+ACCEPT\s+(.+)$')
-EXPORT_FACTOR_MATCH=re.compile('^TO\s+([^s]+)\s+.*\s+ANNOUNCE\s+(.+)$')
-DEFAULT_FACTOR_MATCH=re.compile('^TO\s+([^s]+)\s+.*\s+NETWORKS\s+(.+)$')
+EXPRESSION_DECODE=re.compile('^([^\{\}]{5,}.*|\{(.+)\}(\s+REFINE .*|\s+EXCEPT .*)?)$')
+FACTOR_SPLIT_ACCEPT='ACCEPT '
+FACTOR_SPLIT_ANNOUNCE='ANNOUNCE '
+FACTOR_SPLIT_NETWORKS='NETWORKS '
+FACTOR_SPLIT_FROM='FROM '
+FACTOR_SPLIT_TO='TO '
+AFI_MATCH=re.compile('^AFI\s+([^\s]+)\s+(.*)$')
+
+IMPORT_FACTOR_MATCH=re.compile('^FROM\s+([^\s]+)(\s+(.*)?\s?ACCEPT(.+))?$')
+EXPORT_FACTOR_MATCH=re.compile('^TO\s+([^\s]+)(\s+(.*)?\s?ANNOUNCE(.+))?$')
+DEFAULT_FACTOR_MATCH=re.compile('^TO\s+([^\s]+)(\s+(.*)?\s?NETWORKS(.+)|.*)?$')
 class AutNumRule(object):
     """ Abstract base for internal representation of a rule in an aut-num object.
     """
@@ -249,7 +255,7 @@ class AutNumRule(object):
         """
 
         self.mp = mp
-        self.text = line
+        self.text = line.upper()
 
     def __str__(self):
         return "%s%s : %s"%(self.__class__.__name__, (' MP' if self.mp else ''), self.text)
@@ -262,24 +268,46 @@ class AutNumRule(object):
         # split line to { factor1; factor2; ... } and the rest (refinements etc)
         m=EXPRESSION_DECODE.match(text)
 
-        if m and m.group(2):
+        if m:
+            e=None
             # ignore refinements and excepts and count on case insensitivity of RPSL
-            e=m.group(2).strip().upper()
+            if m.group(1):
+                e=m.group(1).strip()
+            elif m.group(0):
+                e=m.group(0).strip()
+            else:
+                raise Exception('Can not find needed groups in split of expression: '+text)
 
-            if e.match(FACTOR_SPLIT_FROM)>-1:
-                return [str('from'+f).strip() for f in e.split(FACTOR_SPLIT_FROM)[1:]]
+            # defaults for rules like: export: default to AS1234
+            sel=e
+            fltr=''
+            if e.find(FACTOR_SPLIT_ACCEPT)>-1:
+                [sel,fltr] = e.split(FACTOR_SPLIT_ACCEPT, 1)
+                fltr=(FACTOR_SPLIT_ACCEPT+fltr).strip()
+            elif e.find(FACTOR_SPLIT_ANNOUNCE)>-1:
+                [sel,fltr] = e.split(FACTOR_SPLIT_ANNOUNCE, 1)
+                fltr=(FACTOR_SPLIT_ANNOUNCE+fltr).strip()
+            elif e.find(FACTOR_SPLIT_NETWORKS)>-1:
+                [sel,fltr] = e.split(FACTOR_SPLIT_NETWORKS, 1)
+                fltr=(FACTOR_SPLIT_NETWORKS+fltr).strip()
+            else:
+                common.w("Syntax error: Can not find selectors in:", e)
+                #raise Exception("Can not find selectors in: "+e)
 
-            elif e.find(FACTOR_SPLIT_TO)>-1:
-                return [str('to'+f).strip() for f in e.split(FACTOR_SPLIT_TO)[1:]]
+            if sel.find(FACTOR_SPLIT_FROM)>-1:
+                return ([str(FACTOR_SPLIT_FROM+f).strip() for f in sel.split(FACTOR_SPLIT_FROM)[1:]], fltr)
+
+            elif sel.find(FACTOR_SPLIT_TO)>-1:
+                return ([str(FACTOR_SPLIT_TO+f).strip() for f in sel.split(FACTOR_SPLIT_TO)[1:]], fltr)
             
             else:
-                raise Exception("Can not find factors in: "+e)
+                raise Exception("Can not find filter factors in: "+sel)
                 
         else:
-            raise Exception("Can note split expression: "+text)
+            raise Exception("Can not split expression: "+text)
 
     @staticmethod
-    def _normalizeFactor(factor):
+    def _normalizeFactor(selector, fltr):
         """
         Returns (subject, filter) where subject is AS or AS-SET and
         filter is a filter. For example in factor:
@@ -290,21 +318,21 @@ class AutNumRule(object):
         "to AS1234 networks ANY"
         """
 
-        factor=factor.strip().upper()
+        factor=(selector+' '+fltr).strip()
         if factor[-1] == ';':
             factor=factor[:-1].strip()
 
         m=IMPORT_FACTOR_MATCH.match(factor)
-        if m and m.group(1) and m.group(2):
-            return (m.group(1),m.group(2))
+        if m and m.group(1):
+            return (m.group(1).strip(),(m.group(4).strip() if m.group(4) else 'ANY'))
 
         m=EXPORT_FACTOR_MATCH.match(factor)
-        if m and m.group(1) and m.group(2):
-            return (m.group(1),m.group(2))
+        if m and m.group(1):
+            return (m.group(1).strip(),(m.group(4).strip() if m.group(4) else 'ANY'))
 
         m=DEFAULT_FACTOR_MATCH.match(factor)
-        if m and m.group(1) and m.group(2):
-            return (m.group(1),m.group(2))
+        if m and m.group(1):
+            return (m.group(1).strip(),(m.group(4).strip() if m.group(4) else 'ANY'))
 
         raise Exception("Can not parse factor: "+factor)
 
@@ -325,21 +353,28 @@ class AutNumRule(object):
         filled in according to the rule content.
         """
 
-        afi='ipv4.unicast'
+        afi='IPV4.UNICAST'
         if self.mp:
             r=AFI_MATCH.match(self.text)
             if r:
                 afi=r.group(1)
                 e=r.group(1)
             else:
-                raise Exception("Can not match AFI in MP rule: "+self.text)
+                afi='ANY'
 
         factors=AutNumRule._decomposeExpression(self.text)
 
-        return (afi,[AutNumRule._normalizeFactor(f) for f in factors])
+        return (afi,[AutNumRule._normalizeFactor(f, factors[1]) for f in factors[0]])
 
 
-    def match(subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False):
+
+    @staticmethod
+    def matchFilter(factor, prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6=False):
+        # TODO
+        return True
+
+
+    def match(self, subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False):
         """
         Interpret the rule and decide whether a prefix should be accepted or not.
 
@@ -356,10 +391,6 @@ class AutNumRule(object):
         def isASN(asn):
             return str(asn).upper()[:2] == 'AS'
 
-        def matchFilter(factor, prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6=False):
-            # TODO
-            return True
-
         # Fast-path, fail for IPv6 with non-MP rule
         # This is problematic... A lot of people does not have proper
         # routing politics written with mp-* rules and people
@@ -371,25 +402,29 @@ class AutNumRule(object):
         res=self._parseRule() # (afi, [(subject, filter)])
 
         # Check address family matches
-        if res[0] != 'any' and res[0] != 'any.unicast':
-            if ((ipv6 and res[0] != 'ipv6.unicast') or
-            ((not ipv6) and res[0] != 'ipv4.unicast')):
+        if res[0] != 'ANY' and res[0] != 'ANY.UNICAST':
+            if ((ipv6 and res[0] != 'IPV6.UNICAST') or
+            ((not ipv6) and res[0] != 'IPV4.UNICAST')):
                 return False
 
         # Walk through factors and find whether there is subject match,
         # run the filter if so
         for f in res[1]:
+#            common.d("Match? sub=", subject, 'f=', str(f))
+
             if isASN(f[0]):
                 if f[0] == subject:
-                    return matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
+                    return self.matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
 
             elif AsSetObject.isAsSet(f[0]):
                 if f[0] in assetDirectory.table:
                     if assetDirectory.table[f[0]].matchRecursive(subject.upper()):
-                        return matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
+                        return self.matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
 
             else:
-                raise Exception("Can not expand subject: "+str(f[0]))
+                #raise Exception("Can not expand subject: "+str(f[0]))
+                common.w("Can not expand subject:", str(f[0]))
+                return False
 
         # No match of factor means that the prefix should not appear
         return False
@@ -493,7 +528,7 @@ class AutNumObject(RpslObject):
 
 
     def getKey(self):
-        return 'AS%d'%self.aut_num
+        return self.aut_num
 
 
     def __str__(self):
@@ -758,7 +793,7 @@ def check_ripe_route(path_vector, iana_dir, ripe_routes):
         if routes:
             notmatchro=[]
             for r in routes:
-                if r.origin == int(orig):
+                if r.origin == 'AS'+orig:
                     #common.d("Route object match for", path_vector[1], '('+path_vector[3]+"):", str(r))
                     return (path_vector[1], path_vector[3], r, 0)
                 else:        
@@ -911,7 +946,8 @@ def report_route_timeline(timeline, ipv6=False):
                 # use RIPE_ROUTES_MATCH_LEGEND for status
 
                 if r[4] == 3: # not match
-                    tf.write('%s %s (%s) %s: ripe-db orig: %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]], str([ro.origin for ro in r[3]])))
+                    tf.write('%s %s (%s) %s: ripe-db orig: %s\n'%(str(r[0]),
+                        str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]], str([ro.origin for ro in r[3]])))
                 elif r[4] == 4: # not found
                     tf.write('%s %s (%s) %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]]))
                 else:
@@ -928,9 +964,11 @@ def normalize_aspath(text):
     return ['AS'+asn for asn in asns]
 
 
-def check_ripe_path_step(pfx, asn, cueernt_aspath, previous_as, next_as,
-                         autnum_dir, asset_dir, routeset_dir, ipv6=False):
+def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
+                         autnum_dir, asset_dir, routeset_dir, fltrset_dir, ipv6=False):
     """ TODO desc """
+
+    common.d('Checking path for', pfx, 'step from', previous_as, 'to', next_as, 'via', asn)
 
     if asn in autnum_dir.table:
         autnum=autnum_dir.table[asn]
@@ -948,6 +986,7 @@ def check_ripe_path_step(pfx, asn, cueernt_aspath, previous_as, next_as,
                 break
 
         if not import_match:
+            common.d('Invalid: Import match missing.')
             return 3 # import match missing
 
         for er in autnum.export_list:
@@ -961,10 +1000,13 @@ def check_ripe_path_step(pfx, asn, cueernt_aspath, previous_as, next_as,
                 break
 
         if not export_match:
+            common.d('Invalid: Export match missing.')
             return 4 # export match missing
     else:
+        common.d('Dunno: ASN not in RIPE region.')
         return 2 # ASN not in RIPE region (=not found in aut-num directory)
 
+    common.d("Valid. Match.")
     return 0 # otherwise it must have matched both import and export
     
 
@@ -993,12 +1035,12 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
         next_as = (aspath[i+1] if i<(len(aspath)-1) else None)
         
         res = check_ripe_path_step(path_vector[1], asn, aspath[i:], previous_as, next_as,
-                                   autnum_dir, asset_dir, routeset_dir, ipv6)
+                                   autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6)
 
         if res == 2: # means that the ASN is out of RIPE region
             allinripe = False
 
-        status.push((asn, res))
+        status.append((asn, res))
 
     return (path_vector, allinripe, status)
 
@@ -1045,10 +1087,10 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True):
 #    route_dir_pkl = ripe_route6_pickle(d) if ipv6 else ripe_route_pickle(d)
 #    route_dir = common.load_pickle(route_dir_pkl)
 
-    asset_dir = common.load_pickle(ripe_asset_pickle(d))
-    autnum_dir = common.load_pickle(ripe_autnum_pickle(d))
-    filterset_dir = common.load_pickle(ripe_filterset_pickle(d))
-    routeset_dir = common.load_pickle(ripe_routeset_pickle(d))
+    asset_dir = common.load_pickle(ripe_asset_pickle(day))
+    autnum_dir = common.load_pickle(ripe_autnum_pickle(day))
+    filterset_dir = common.load_pickle(ripe_filterset_pickle(day))
+    routeset_dir = common.load_pickle(ripe_routeset_pickle(day))
 
     bgpdump=common.load_pickle(bgp.bgpdump_pickle(day, host, ipv6))
 
@@ -1061,7 +1103,7 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True):
         if rc[3] == 0 or rc[3] == 5: # if the route checks in RIPE DB or it is outside of RIPE region
             yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6)
         else:
-            common.d("origin does not match... no point in checkign the path", path_vector)
+            common.d("origin does not match... no point in checking the path", path_vector)
             status  = [(asn, 0) for asn in normalize_aspath(path_vector[3])]
             status[-1] = (status[-1][-1], 1) # 1=route object failure or uncheckable route,
             # either local route or aggregate route generated in some remote location
@@ -1154,6 +1196,8 @@ def module_prepare_thread(tasks):
     for t in tasks:
         module_prepare_day(t[0], t[1])
 
+
+
 # Module interface
 
 def module_prepare(data_root_dir):
@@ -1196,6 +1240,7 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
             res=None
             bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
             if not os.path.isfile(bgp2routesfn):
+                common.d("Creating file", bgp2routesfn)
                 res=list(check_ripe_routes(d, ianadir, host, ipv6, True))
                 common.save_pickle(res, bgp2routesfn)
             else:
@@ -1210,6 +1255,7 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
             # check paths
             bgp2pathsfn=common.resultdir(d)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
             if not os.path.isfile(bgp2pathsfn):
+                common.d("Creating file", bgp2pathsfn)
                 res=list(check_ripe_paths(d, ianadir, host, ipv6, True))
                 common.save_pickle(res, bgp2pathsfn)
             else:
