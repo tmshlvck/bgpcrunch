@@ -41,6 +41,7 @@ RIPE_DB_AUTNUM='/ripe.db.aut-num'
 RIPE_DB_ASSET='/ripe.db.as-set'
 RIPE_DB_FILTERSET='/ripe.db.filter-set'
 RIPE_DB_ROUTESET='/ripe.db.route-set'
+RIPE_DB_PEERINGSET='/ripe.db.peering-set'
 
 RIPE_DB_ROUTE_PICKLE='/ripe.route.pickle'
 RIPE_DB_ROUTE6_PICKLE='/ripe.route6.pickle'
@@ -48,6 +49,7 @@ RIPE_DB_AUTNUM_PICKLE='/ripe.autnum.pickle'
 RIPE_DB_ASSET_PICKLE='/ripe.asset.pickle'
 RIPE_DB_FILTERSET_PICKLE='/ripe.filterset.pickle'
 RIPE_DB_ROUTESET_PICKLE='/ripe.routeset.pickle'
+RIPE_DB_PEERINGSET_PICKLE='/ripe.peeringset.pickle'
 
 RIPE_BGP2ROUTES4_TXT='/bgp2routes.txt'
 RIPE_BGP2ROUTES4_PICKLE='/bgp2routes.pickle'
@@ -237,9 +239,9 @@ class RouteObjectDir(object):
 # Aut-num object machinery
 
 EXPRESSION_DECODE=re.compile('^([^\{\}]{5,}.*|\{(.+)\}(\s+REFINE .*|\s+EXCEPT .*)?)$')
-FACTOR_SPLIT_ACCEPT=' ACCEPT'
-FACTOR_SPLIT_ANNOUNCE=' ANNOUNCE'
-FACTOR_SPLIT_NETWORKS=' NETWORKS'
+FACTOR_SPLIT_ACCEPT='ACCEPT'
+FACTOR_SPLIT_ANNOUNCE='ANNOUNCE'
+FACTOR_SPLIT_NETWORKS='NETWORKS'
 FACTOR_SPLIT_FROM='FROM '
 FACTOR_SPLIT_TO='TO '
 AFI_MATCH=re.compile('^AFI\s+([^\s]+)\s+(.*)$')
@@ -424,13 +426,13 @@ class AutNumRule(object):
         for f in m.group(1).strip().split(','):
             f=f.strip()
             m=PFX_FLTR_PARSE.match(f)
+            fnet=ipaddr.IPNetwork(m.group(1))
             if m.group(2):
                 if not rngset:
-                    rng = _parseRange(m.group(2), ipv6)
+                    rng = _parseRange(m.group(2), fnet.prefixlen, ipv6)
                 else:
                     common.w("Range mismatch in prefix filter:", fltr)
 
-            fnet=ipaddr.IPNetwork(m.group(1))
             pnet=ipaddr.IPNetwork(prefix)
 
             if not rngset:
@@ -514,7 +516,8 @@ class AutNumRule(object):
         return 0
 
 
-    def match(self, subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False):
+    def match(self, subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory,
+              rtsetDirectory, prngsetDirectory, ipv6=False):
         """
         Interpret the rule and decide whether a prefix should be accepted or not.
 
@@ -563,6 +566,11 @@ class AutNumRule(object):
             elif AsSetObject.isAsSet(f[0]):
                 if f[0] in assetDirectory.table:
                     if assetDirectory.table[f[0]].recursiveMatch(subject, assetDirectory):
+                        return self.matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
+
+            elif PeeringSetObject.isPeeringSet(f[0]):
+                if f[0] in prngsetDirectory.table:
+                    if prngsetDirectory.table[f[0]].recursiveMatch(subject, prngsetDirectory):
                         return self.matchFilter(f[1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, ipv6)
 
             else:
@@ -764,6 +772,74 @@ class AsSetObject(RpslObject):
         return 'AsSetObject: %s -< %s'%(self.as_set, str(self.members))
 
 
+class PeeringSetObject(RpslObject):
+    """ Internal representation of prng-set RPSL object. """
+
+    PEERINGSET_ATTR='PEERING-SET'
+    PEERING_ATTR='PEERING'
+    MP_PEERING_ATTR='MP-PEERING'
+
+    @staticmethod
+    def _parsePeering(p):
+        return p.strip().split(' ')[0]
+
+    @staticmethod
+    def isPeeringSet(name):
+        """ Returs True when the name appears to be as-set name (=key)
+        according to RPSL specs. """
+        return str(name).upper().find('PRNG-') > -1
+    
+    def __init__(self,textlines):
+        RpslObject.__init__(self,textlines)
+        self.peering_set=None
+        self.peering=[]
+        self.mp_peering=[]
+
+        for (a,v) in RpslObject.splitLines(self.text):
+            if a==self.PEERINGSET_ATTR:
+                self.peering_set=v.strip().upper()
+                
+            elif a==self.PEERING_ATTR:
+                self.peering.append(PeeringSetObject._parsePeering(v))
+
+            elif a==self.MP_PEERING_ATTR:
+                self.mp_peering.append(PeeringSetObject._parsePeering(v))
+            else:
+                pass # ignore unrecognized lines
+
+        if not self.peering_set:
+            raise Exception("Can not create AsSetObject out of text: "+str(textlines))
+
+
+    def getKey(self):
+        return self.peering_set
+
+    def recursiveMatch(self, target, hashObjDir, recursionList=None):
+        if recursionList == None:
+            recursionList = []
+        
+#        common.d("PeeringSetObject recursiveMatch: target", target, 'in', self.getKey(),
+#                 'recursionList', recursionList)
+
+        # prevent recusion loop
+        if self.getKey() in recursionList:
+            return False
+        recursionList.append(self.getKey())
+        
+        if target in self.peering or target in self.mp_peering:
+            return True
+
+        for m in (self.peering + self.mp_peering):
+            if self.isPeeringSet(m) and m in hashObjDir.table:
+                r = hashObjDir.table[m].recursiveMatch(target, hashObjDir, recursionList)
+                if r:
+                    return True
+
+        return False
+
+    def __str__(self):
+        return 'PeeringSetObject: %s -< %s mp: %s'%(self.peering_set, str(self.peering), str(self.mp_peering))
+
 
 
 class FilterSetObject(RpslObject):
@@ -902,6 +978,8 @@ def ripe_filterset_pickle(day):
 def ripe_routeset_pickle(day):
     return common.resultdir(day)+RIPE_DB_ROUTESET_PICKLE
 
+def ripe_peeringset_pickle(day):
+    return common.resultdir(day)+RIPE_DB_PEERINGSET_PICKLE
 
 def decode_ripe_tgz_filename(filename):
     """
@@ -1125,7 +1203,7 @@ def normalize_aspath(text):
 
 
 def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
-                         autnum_dir, asset_dir, routeset_dir, fltrset_dir, ipv6=False):
+                         autnum_dir, asset_dir, routeset_dir, fltrset_dir, prngset_dir, ipv6=False):
     """
     Check one step in as-path from BGP by means of resolving proper aut-num
     object for the asn and check filters based on prefix that is being checked
@@ -1156,7 +1234,8 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
             import_match = True
         else:
             for ir in autnum.import_list:
-                m=ir.match(previous_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6)
+                m=ir.match(previous_as, pfx, current_aspath, asset_dir, fltrset_dir,
+                           routeset_dir, prngset_dir, ipv6)
                 if m == 0:
                     import_match=True
                     break
@@ -1165,7 +1244,8 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
                         status=m
 
             for ir in autnum.mp_import_list:
-                m=ir.match(previous_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6)
+                m=ir.match(previous_as, pfx, current_aspath, asset_dir, fltrset_dir,
+                           routeset_dir, prngset_dir, ipv6)
                 if m == 0:
                     import_match=True
                     break
@@ -1182,7 +1262,8 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
             export_match=True
         else:
             for er in autnum.export_list:
-                m=er.match(next_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6)
+                m=er.match(next_as, pfx, current_aspath, asset_dir, fltrset_dir,
+                           routeset_dir, prngset_dir, ipv6)
                 if m == 0:
                     export_match=True
                     break
@@ -1191,7 +1272,8 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
                         status=m
 
             for er in autnum.mp_export_list:
-                m=er.match(next_as, pfx, current_aspath, asset_dir, fltrset_dir, routeset_dir, ipv6)
+                m=er.match(next_as, pfx, current_aspath, asset_dir, fltrset_dir,
+                           routeset_dir, prngset_dir, ipv6)
                 if m == 0:
                     export_match=True
                     break
@@ -1211,7 +1293,8 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
     
 
 
-def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6=False, myas=None):
+def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir,
+                    prngset_dir, ipv6=False, myas=None):
     """
     Chech path in path vector by means of resolving all aut-num
     object and filters along the as-path in the path_vector from BGP.
@@ -1235,7 +1318,7 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
         next_as = (aspath[i+1] if i<(len(aspath)-1) else None)
         
         res = check_ripe_path_step(path_vector[1], asn, aspath[i:], previous_as, next_as,
-                                   autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6)
+                                   autnum_dir, asset_dir, routeset_dir, filterset_dir, prngset_dir, ipv6)
 
         if res == 2: # means that the ASN is out of RIPE region
             allinripe = False
@@ -1293,17 +1376,23 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None):
     autnum_dir = common.load_pickle(ripe_autnum_pickle(day))
     filterset_dir = common.load_pickle(ripe_filterset_pickle(day))
     routeset_dir = common.load_pickle(ripe_routeset_pickle(day))
+    peeringset_dir = common.load_pickle(ripe_peeringset_pickle(day))
 
     bgpdump=common.load_pickle(bgp.bgpdump_pickle(day, host, ipv6))
 
     # Run the check for BGP data of the day
+    count = 0
     for path_vector in bgpdump:
+        count+=1
+        if count % 1000 == 0:
+            print 'Progress: %d of %d'%(count, len(bgpdump))
         if bestonly and not (path_vector[0] and '>' in path_vector[0]):
             continue
 
         rc = check_ripe_route(path_vector, ianadir, riperoutes)
         if rc[3] == 0 or rc[3] == 5: # if the route checks in RIPE DB or it is outside of RIPE region
-            yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir, ipv6, myas)
+            yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir,
+                                  peeringset_dir, ipv6, myas)
         else:
 #            common.d("Origin does not match... No point in checking the path.", path_vector)
             status  = [(asn, 0) for asn in normalize_aspath(path_vector[3])]
@@ -1439,7 +1528,8 @@ def module_prepare_day(fn, d):
         os.path.isfile(ripe_autnum_pickle(d)) and
         os.path.isfile(ripe_asset_pickle(d)) and
         os.path.isfile(ripe_filterset_pickle(d)) and
-        os.path.isfile(ripe_routeset_pickle(d))):
+        os.path.isfile(ripe_routeset_pickle(d)) and
+        os.path.isfile(ripe_peeringset_pickle(d))):
         common.d("Skipping dir", d, "because we have all needed results.")
         return
 
@@ -1502,6 +1592,15 @@ def module_prepare_day(fn, d):
             common.save_pickle(fs, ripe_routeset_pickle(d))
         else:
             raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTESET)
+
+        # ripe.db.peering-set
+        common.d("Parsing", tmpdir+RIPE_DB_PEERINGSET)
+        if os.path.isfile(tmpdir+RIPE_DB_PEERINGSET):
+            fs=HashObjectDir(tmpdir+RIPE_DB_PEERINGSET, PeeringSetObject)
+            common.save_pickle(fs, ripe_peeringset_pickle(d))
+        else:
+            raise Exception("Missing file "+tmpdir+RIPE_DB_PEERINGSET)
+
 
     finally:
         common.d("Removing dir", tmpdir, "expanded from", fn, "for time", d, ".")
@@ -1611,13 +1710,16 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
 def main():
 #    raise Exception("This test does not work unless special environment is set.")
 
-    route_testfile='/home/brill/ext/tmp/ripe.db.route'
-    route6_testfile='/home/brill/ext/tmp/ripe.db.route6'
-    autnum_testfile='/home/brill/ext/tmp/ripe.db.aut-num'
-    asset_testfile='/home/brill/ext/tmp/ripe.db.as-set'
-    fltrset_testfile='/home/brill/ext/tmp/ripe.db.filter-set'
-    routeset_testfile='/home/brill/ext/tmp/ripe.db.route-set'
-    
+    testdir='/home/brill/ext/tmp'
+    route_testfile=testdir+RIPE_DB_ROUTE
+    route6_testfile=testdir+RIPE_DB_ROUTE6
+    autnum_testfile=testdir+RIPE_DB_AUTNUM
+    asset_testfile=testdir+RIPE_DB_ASSET
+    fltrset_testfile=testdir+RIPE_DB_FILTERSET
+    routeset_testfile=testdir+RIPE_DB_ROUTESET
+    peeringset_testfile=testdir+RIPE_DB_PEERINGSET
+
+
     def test_routes():
         ripeRoutes=RouteObjectDir(route_testfile, False)
         # ripeRoutes.tree.dump()
@@ -1648,6 +1750,11 @@ def main():
         for rset in routeSets:
             print str(rset)
 
+    def test_peeringsets():
+        prngSets=RpslObject.parseRipeFile(peeringset_testfile, PeeringSetObject)
+        for pset in prngSets:
+            print str(pset)
+
     def test_autnum():
         class MockupDir(object):
             def __init__(self):
@@ -1669,6 +1776,7 @@ def main():
 #    test_assets()
 #    test_fltrsets()
 #    test_routesets()
+    test_peeringsets()
     test_autnum()
 
 
