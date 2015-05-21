@@ -72,7 +72,7 @@ def main():
                         # Run basic BGP stats with regards to IANA top-level assignments
                         ianaspace.module_run(ianadir, host, bgp_days, ipv6, bestonly=True)
 
-                rpsl.module_run(ripe_days, ianadir, host, bgp_days, ipv6)
+                        rpsl.module_run(ripe_days, ianadir, host, bgp_days, ipv6)
 
 
 if __name__ == '__main__':
