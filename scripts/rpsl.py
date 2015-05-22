@@ -181,7 +181,7 @@ class RouteObject(RpslObject):
                 else:
                     raise Exception("Can not parse tuple "+a+":"+v)
 
-            elif a==self.MEMBER_OF:
+            elif a==self.MEMBEROF_ATTR:
                 self.members+=[m.strip() for m in v.strip().split(',')]
 
             else:
@@ -263,9 +263,9 @@ EXPORT_FACTOR_MATCH=re.compile('^TO\s+([^\s]+)(\s+(.*)?\s?ANNOUNCE(.+))?$')
 DEFAULT_FACTOR_MATCH=re.compile('^TO\s+([^\s]+)(\s+(.*)?\s?NETWORKS(.+)|.*)?$')
 
 ASN_MATCH=re.compile('^AS[0-9]+$')
-PFX_FLTR_MATCH=re.compile('^\{([^}]+)\}(\^[0-9\+-])?$')
+PFX_FLTR_MATCH=re.compile('^\{([^}]*)\}(\^[0-9\+-]+)?$')
 PFX_FLTR_PARSE=re.compile('^([0-9A-F:\.]+/[0-9]+)(\^[0-9\+-]+)?$')
-
+REGEXP_FLTR_PARSE=re.compile('^<([^>]+)>$')
 class AutNumRule(object):
     """ Abstract base for internal representation of a rule in an aut-num object.
     """
@@ -395,71 +395,122 @@ class AutNumRule(object):
 
     @staticmethod
     def isASN(asn):
-            return ASN_MATCH.match(str(asn).strip()) != None
+        return ASN_MATCH.match(str(asn).strip()) != None
 
 
     @staticmethod
     def isPfxFilter(fltr):
-        m=PFX_FLTR_MATCH.match(fltr.strip())
-        if m:
-            return m.group(1)
-        else:
-            return None
+        return PFX_FLTR_MATCH.match(fltr) != None
 
     @staticmethod
     def matchPfxFltr(fltr, prefix, ipv6):
+        #common.d("matchPfxFltr:", fltr, prefix)
+        
         def _parseRange(rng, lowbound, ipv6):
             PARSE_RANGE=re.compile('^\^([0-9]+)-([0-9]+)$')
             maxpl = 128 if ipv6 else 32
             rng=rng.strip()
                 
             if rng == '^+':
-                return [str(lowbound), maxpl]
+                return [int(lowbound), maxpl]
             elif rng == '^-':
-                return [str(lowbound+1), maxpl]
+                return [int(lowbound)+1, maxpl]
 
             elif rng[1:].isdigit():
-                return [int(rng),int(rng)]
+                return [int(rng[1:]),int(rng[1:])]
                 
             elif PARSE_RANGE.match(rng):
                 m=PARSE_RANGE.match(rng)
-                return [m.group(1), m.group(2)]
+                return [int(m.group(1)), int(m.group(2))]
 
             else:
                 common.w("Can not parse range:", rng)
                 return [0,maxpl]
 
+        if fltr.strip() == '{}':
+            return False
+
         m=PFX_FLTR_MATCH.match(fltr.strip())
-        rng=[0,128] if ipv6 else [0,32]
-        rngset=False
+        grng=None
         if m.group(2):
-            rng = _parseRange(m.group(2), ipv6)
+            grng = _parseRange(m.group(2), ipv6)
 
         for f in m.group(1).strip().split(','):
             f=f.strip()
             m=PFX_FLTR_PARSE.match(f)
             fnet=None
+            rng=None
             if m:
                 fnet=ipaddr.IPNetwork(m.group(1))
                 if m.group(2):
-                    if not rngset:
-                        rng = _parseRange(m.group(2), fnet.prefixlen, ipv6)
-                    else:
-                        common.w("Range mismatch in prefix filter:", fltr)
+                    rng = _parseRange(m.group(2), fnet.prefixlen, ipv6)
             else:
                 raise Exception("Can not parse filter: "+fltr+" matching with pfx "+prefix)
 
             pnet=ipaddr.IPNetwork(prefix)
 
-            if not rngset:
+            # take into account possibility of multiple ranges,
+            # i.e. {1.2.0.0/16^+}^24-32 (use the most specific one, left-most)
+            # if no range is set, take the prefix as it is
+            if not rng and grng:
+                rng=grng
+            if not rng:
                 rng=[fnet.prefixlen, fnet.prefixlen]
 
+            # finaly do the check
             if (pnet in fnet) and (rng[0] <= pnet.prefixlen) and (rng[1] >= pnet.prefixlen):
                 return True
 
         # no match means filter failed -> false
         return False
 
+
+    @staticmethod
+    def isAsPathRegExp(fltr):
+        return REGEXP_FLTR_PARSE.match(fltr) != None
+
+    @staticmethod
+    def matchAsPathRegExp(fltr, asPath):
+        """
+        Apply regexp from regexp filter. This is a bit bold because
+        we just use Python's re.
+
+        Allocated failure code is 13 and dunno code 21. OK=0.
+        """
+
+        if len(asPath) == 0:
+            return 13
+
+        ref = REGEXP_FLTR_PARSE.match(fltr).group(1) # should not fail... test it before
+        ref.replace('PEERAS', asPath[0])
+
+        if not ref.startswith('^'):
+            ref='.*'+ref
+        if not ref.endswith('$'):
+            ref+='.*'
+
+        if ref.find('AS-') > -1:
+            # can not recursively expand as-set names, return dunno
+            # this is potential problem of large scale, but it is more
+            # efficient to adress this by manual analysis or by own script
+            # because regexp parsing is anyway problematic when RPSL is
+            # being translated to Cisco/Juniper/... configs
+            return 21
+
+        # Attempt the match
+        asps=''
+        for i,asn in enumerate(asPath):
+            asps+=(asn+' ')
+        asps=asps.strip()
+
+        try:
+            if re.match(ref, asps):
+                return 0
+        except:
+            return 21
+
+        # return not-match otherwise
+        return 13
             
     @staticmethod
     def matchFilter(fltr, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False):
@@ -476,8 +527,11 @@ class AutNumRule(object):
         8 { prefix^range } match failed
         9 composed expression failed
         10 unknown fltr-set
-        11 unkown route-set
-        12 unknown filter
+        11 unkown route-set or route-set not match
+        13 regexp failed to validate
+        20 unknown filter (=dunno)
+        21 unknown regexp (=dunno)
+        22 community can not be decided (=dunno)
         """
         
 #        common.d("Matching filter", fltr, 'prefix', prefix, 'current_aspath', str(currentAsPath))
@@ -502,21 +556,34 @@ class AutNumRule(object):
         op=" OR "
         i=findOper(fltr, op)
         if i>=0:
+            #common.d("OR recursion a:", fltr[:i], "b:", fltr[i+len(op):])
             a=AutNumRule.matchFilter(fltr[:i], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
             b=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            #common.d("Recusion result a:", a, "b", b)
+            if a >= 20 and b >= 20:
+                return 20
+            
             return (0 if a == 0 or b == 0 else 9)
 
         op=" AND "
         i=findOper(fltr, op)
         if i>=0:
+            #common.d("AND recursion a:", fltr[:i], "b:", fltr[i+len(op):])
             a=AutNumRule.matchFilter(fltr[:i], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
             b=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            #common.d("Recusion result a:", a, "b", b)
+            if a >= 20 or b >= 20:
+                return 20
             return (0 if a == 0 and b == 0 else 9)
 
         op="NOT "
         i=findOper(fltr, op)
         if i>=0:
+            #common.d("NOT recursion a:", fltr[:i])
             a=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            #common.d("Recusion result a:", a)
+            if a >= 20:
+                return 20
             return (0 if not a == 0 else 9)
 
         # Parentheses
@@ -565,23 +632,44 @@ class AutNumRule(object):
                 return 8
 
         elif FilterSetObject.isFltrSet(fltr):
-            if fltr in fltrsetDirectory:
-                r=AutNumRule.matchFilter(fltrsetDirectory[fltr].filter, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
-                if r == 0:
-                    return 0
-                return AutNumRule.matchFilter(fltrsetDirectory[fltr].mp_filter, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            if fltr in fltrsetDirectory.table:
+                if ipv6:
+                    return AutNumRule.matchFilter(fltrsetDirectory.table[fltr].mp_filter, prefix, currentAsPath, assetDirectory,
+                                                  fltrsetDirectory, rtsetDirectory, ipv6)
+                else:
+                    return AutNumRule.matchFilter(fltrsetDirectory.table[fltr].filter, prefix, currentAsPath, assetDirectory,
+                                                  fltrsetDirectory, rtsetDirectory, ipv6)
             else:
                 return 10
 
         elif RouteSetObject.isRouteSet(fltr):
-            # TODO
+            if fltr in rtsetDirectory.table:
+                members=(rtsetDirectory.table[fltr].mp_members if ipv6 else rtsetDirectory.table[fltr].members)
+                for m in members:
+                    if RouteSetObject.isRouteSet(m): # route-set name
+                        if AutNumRule.matchFilter(m, prefix, currentAsPath, assetDirectory,
+                                                  fltrsetDirectory, rtsetDirectory, ipv6) == 0:
+                            return 0
+                    else: # prefix or prefix range
+                        if AutNumRule.matchFilter('{ '+m+' }', prefix, currentAsPath, assetDirectory,
+                                                  fltrsetDirectory, rtsetDirectory, ipv6) == 0:
+                            return 0
             return 11
 
-        # TODO <regular expression>
+        # <regular expression>
+        elif AutNumRule.isAsPathRegExp(fltr):
+            r=AutNumRule.matchAsPathRegExp(fltr, currentAsPath)
+            if r>20:
+                return 20
+            else:
+                return r
+
+        elif fltr.find('COMMUNITY(') > -1:
+            return 22
 
         # Dunno, return False
         common.w("Can not parse filter:", fltr)
-        return 12
+        return 20
 
 
     def match(self, subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory,
@@ -943,7 +1031,7 @@ class FilterSetObject(RpslObject):
     def isFltrSet(fltrsetid):
         """ Returs True when the name appears to be filter-set name (=key)
         according to RPSL specs. """
-        return str(fltrsetid).upper().find('FLTR-') > -1
+        return fltrsetid.upper().find('FLTR-') > -1
 
     def getKey(self):
         return self.filter_set
@@ -994,18 +1082,13 @@ class RouteSetObject(RpslObject):
     def isRouteSet(rsid):
         """ Returs True when the name appears to be route-set name (=key)
         according to RPSL specs. """
-        return str(fltrsetid).upper().find('RS-') > -1
+        return str(rsid).find('RS-') > -1
 
     def getKey(self):
         return self.route_set
 
     def __str__(self):
         return 'RouteSetbject: %s -< %s + %s'%(self.route_set, str(self.members), str(self.mp_members))
-
-
-    def match(self, prefix):
-        # TODO
-        return True
 
 
 class HashObjectDir(object):
@@ -1259,7 +1342,7 @@ def normalize_aspath(text):
     text = text.replace('{', '').replace('}', '')
     asns = text.split()[:-1] # remove i or e or ? in the end of the string (= which means on
     # the beginning of the AS path)
-    return ['AS'+asn for asn in asns]
+    return ['AS'+asn.strip() for asn in asns]
 
 
 def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
@@ -1275,6 +1358,7 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
     0 = step match (=OK)
     1 = subject expansion failed (=recursion trhough as-set failed)
     2 = ASN not in RIPE region (=not found in aut-num directory)
+    20 = filter reported DUNNO (=too complex filter to know/parse)
     300-399 = import match filter failure
     300 = can not find matching rule, otherwise subtract 300 and see matchFilter()
     400-499 = export match filter failure
@@ -1530,20 +1614,30 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                     failures += 1
                     ts = 'import rule not found'
 
-                elif s > 300 and s < 400:
+                elif s > 300 and s < 320:
                     total_import_fltrfail += 1
                     failures += 1
                     ts = 'import filter failed'
 
+                elif s >= 320 and s < 400:
+                    total_hops_dunno += 1
+                    dunno = True
+                    ts = 'import filter DUNNO'
+                    
                 elif s == 400:
                     total_export_notfound += 1
                     failures += 1
                     ts = 'export fule not found'
 
-                elif s > 400 and s < 500:
+                elif s > 400 and s < 420:
                     total_export_fltrfail += 1
                     failures += 1
                     ts = 'export filter failed'
+
+                elif s >= 420 and s < 500:
+                    total_hops_dunno += 1
+                    dunno = True
+                    ts = 'export filter DUNNO'
 
                 else:
                     common.w('Unknown status in report_ripe_path_day: ', str(s))
@@ -1568,7 +1662,7 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
         of.write('\n')
         of.write("%s: %d\n"%('Total hops observed', total_hops))
         of.write("%s: %d\n"%('Total hops valid', total_hops_ok))
-        of.write("%s: %d\n"%('Total hops unknown (non-RIPE/aggregate/...)', total_hops_dunno))
+        of.write("%s: %d\n"%('Total hops unknown (non-RIPE/aggregate/filter-dunno)', total_hops_dunno))
         of.write("%s: %d\n"%('Total import filter not-found', total_import_notfound))
         of.write("%s: %d\n"%('Total import filter invalid', total_import_fltrfail))
         of.write("%s: %d\n"%('Total export filter not-found', total_export_notfound))
@@ -1873,8 +1967,32 @@ def main():
 
 
     def test_filters():
-        # TODO filter tests
-        pass
+        asset_dir=HashObjectDir(asset_testfile, AsSetObject)
+        routeset_dir=HashObjectDir(routeset_testfile, RouteSetObject)
+        fltrset_dir=HashObjectDir(fltrset_testfile, FilterSetObject)
+
+        tests=[
+            ('ANY', '1.2.3.0/24', normalize_aspath('1 2 3 i'), False),
+            ('ANY AND NOT { 2.3.4.0/24 }', '1.2.3.0/24', normalize_aspath('1 2 3 i'), False),
+            ('ANY AND NOT { 1.2.3.0/24 }', '1.2.3.0/24', normalize_aspath('1 2 3 i'), False),
+            ('PEERAS', '1.2.3.0/24', normalize_aspath('1 1 1 i'), False),
+            ('PEERAS', '1.2.3.0/24', normalize_aspath('1 2 3 i'), False),
+            ('ANY AND NOT FLTR-BOGONS', '1.2.3.0/24', normalize_aspath('1 2 3 i'), False),
+            ('ANY AND NOT FLTR-BOGONS', '192.168.1.0/24', normalize_aspath('1 2 3 i'), False),
+            ('FLTR-BOGONS', '192.168.1.0/24', normalize_aspath('1 2 3 i'), False),
+            ('AS-IGNUM-NIX', '192.168.1.0/24', normalize_aspath('1 2 3 29134 i'), False),
+            ('AS-IGNUM-NIX', '192.168.1.0/24', normalize_aspath('1 2 3 i'), False),
+            ('<^AS1>', '192.168.1.0/24', normalize_aspath('1 2 3 i'), False),
+            ('<^AS3>', '192.168.1.0/24', normalize_aspath('1 2 3 i'), False),
+            ('AS12779:FLTR-BOGONS-V6', '2001::/22', normalize_aspath('1 2 3 i'), True),
+            ('AS12779:FLTR-BOGONS-V6', '2001:2a02::/48', normalize_aspath('1 2 3 i'), True),
+        ]
+        
+        #AutNumRule.matchFilter(fltr, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+        for t in tests:
+            print str(t)+":"
+            print str(AutNumRule.matchFilter(t[0], t[1], t[2], asset_dir, fltrset_dir, routeset_dir, t[3]))
+            print "---------------------------------------------------------"
     
 
 #    test_routes()
@@ -1882,8 +2000,8 @@ def main():
 #    test_assets()
 #    test_fltrsets()
 #    test_routesets()
-    test_peeringsets()
-    test_autnum()
+#    test_peeringsets()
+#    test_autnum()
     test_filters()
 
 
