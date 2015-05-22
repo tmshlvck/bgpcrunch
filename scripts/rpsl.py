@@ -23,6 +23,7 @@ import os
 import ipaddr
 import traceback
 import threading
+import gc
 
 import common
 import graph
@@ -163,31 +164,38 @@ class RouteObject(RpslObject):
     
     ROUTE_ATTR = 'ROUTE'
     ORIGIN_ATTR = 'ORIGIN'
+    MEMBEROF_ATTR = 'MEMBER-OF'
     def __init__(self,textlines):
         RpslObject.__init__(self,textlines)
         self.route=None
         self.origin=None
+        self.members=None
 
         for (a,v) in RpslObject.splitLines(self.text):
             if a==self.ROUTE_ATTR:
                 self.route=v.strip()
+
             elif a==self.ORIGIN_ATTR:
-                if v.upper()[:2] == 'AS':
+                if v[:2] == 'AS':
                     self.origin=v.strip().upper()
                 else:
                     raise Exception("Can not parse tuple "+a+":"+v)
 
+            elif a==self.MEMBER_OF:
+                self.members+=[m.strip() for m in v.strip().split(',')]
+
+            else:
+                pass # ignore unknown lines
+
             # ??? Add holes. But why? It is impossible to check hole existence at
             # this point. New module and new walk through is needed perhaps.
 
-            if self.route and self.origin:
-                break
-
+            
         if not (self.route and self.origin):
             raise Exception("Can not create RouteObject out of text: "+str(textlines))
 
     def getKey(self):
-        return self.route.upper()
+        return self.route
 
     def __str__(self):
         return 'RouteObject: '+str(self.route)+'->'+str(self.origin)
@@ -231,6 +239,10 @@ class RouteObjectDir(object):
     def getRouteObjs(self, prefix):
         return self.tree.lookupNetExact(prefix)
 
+    def enumerateObjs(self):
+        for k in self.originTable.keys():
+            for o in self.originTable[k]:
+                yield o
 
 
 
@@ -252,7 +264,7 @@ DEFAULT_FACTOR_MATCH=re.compile('^TO\s+([^\s]+)(\s+(.*)?\s?NETWORKS(.+)|.*)?$')
 
 ASN_MATCH=re.compile('^AS[0-9]+$')
 PFX_FLTR_MATCH=re.compile('^\{([^}]+)\}(\^[0-9\+-])?$')
-PFX_FLTR_PARSE=re.compile('^([0-9A-F:\.]+/[0-9])(\^[0-9\+-])?$')
+PFX_FLTR_PARSE=re.compile('^([0-9A-F:\.]+/[0-9]+)(\^[0-9\+-]+)?$')
 
 class AutNumRule(object):
     """ Abstract base for internal representation of a rule in an aut-num object.
@@ -397,16 +409,16 @@ class AutNumRule(object):
     @staticmethod
     def matchPfxFltr(fltr, prefix, ipv6):
         def _parseRange(rng, lowbound, ipv6):
-            PARSE_RANGE=re.compile('^([0-9]+)-([0-9]+)$')
+            PARSE_RANGE=re.compile('^\^([0-9]+)-([0-9]+)$')
             maxpl = 128 if ipv6 else 32
             rng=rng.strip()
                 
-            if rng == '+':
+            if rng == '^+':
                 return [str(lowbound), maxpl]
-            elif rng == '-':
+            elif rng == '^-':
                 return [str(lowbound+1), maxpl]
 
-            elif reg.isdigit():
+            elif rng[1:].isdigit():
                 return [int(rng),int(rng)]
                 
             elif PARSE_RANGE.match(rng):
@@ -426,12 +438,16 @@ class AutNumRule(object):
         for f in m.group(1).strip().split(','):
             f=f.strip()
             m=PFX_FLTR_PARSE.match(f)
-            fnet=ipaddr.IPNetwork(m.group(1))
-            if m.group(2):
-                if not rngset:
-                    rng = _parseRange(m.group(2), fnet.prefixlen, ipv6)
-                else:
-                    common.w("Range mismatch in prefix filter:", fltr)
+            fnet=None
+            if m:
+                fnet=ipaddr.IPNetwork(m.group(1))
+                if m.group(2):
+                    if not rngset:
+                        rng = _parseRange(m.group(2), fnet.prefixlen, ipv6)
+                    else:
+                        common.w("Range mismatch in prefix filter:", fltr)
+            else:
+                raise Exception("Can not parse filter: "+fltr+" matching with pfx "+prefix)
 
             pnet=ipaddr.IPNetwork(prefix)
 
@@ -458,6 +474,10 @@ class AutNumRule(object):
         6 when unknown as-set is in the filter
         7 PeerAS match failed
         8 { prefix^range } match failed
+        9 composed expression failed
+        10 unknown fltr-set
+        11 unkown route-set
+        12 unknown filter
         """
         
 #        common.d("Matching filter", fltr, 'prefix', prefix, 'current_aspath', str(currentAsPath))
@@ -466,8 +486,48 @@ class AutNumRule(object):
         fltr=fltr.strip()
 
 
-        # TODO: Recrusion
+        # Recrusion for composed filters (with NOT, AND and OR)
+        def findOper(text, oper):
+            """ Find the first occurance of operator that is out of the parentheses. """
+            pc=0
+            for i,c in enumerate(text):
+                if c == '(':
+                    pc+=1
+                if c == ')':
+                    pc-=1
+                if pc == 0 and text[i:].startswith(oper):
+                    return i
+            return -1
 
+        op=" OR "
+        i=findOper(fltr, op)
+        if i>=0:
+            a=AutNumRule.matchFilter(fltr[:i], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            b=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            return (0 if a == 0 or b == 0 else 9)
+
+        op=" AND "
+        i=findOper(fltr, op)
+        if i>=0:
+            a=AutNumRule.matchFilter(fltr[:i], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            b=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            return (0 if a == 0 and b == 0 else 9)
+
+        op="NOT "
+        i=findOper(fltr, op)
+        if i>=0:
+            a=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            return (0 if not a == 0 else 9)
+
+        # Parentheses
+
+        if fltr[0] == '(':
+            if fltr[-1] == ')':
+                return AutNumRule.matchFilter(fltr[1:-1], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            else:
+                raise Exception("Can not parse parentheses in filter:", fltr)
+
+        # Atomic statements
         
         if fltr.strip() == 'ANY':
             return 0
@@ -505,15 +565,23 @@ class AutNumRule(object):
                 return 8
 
         elif FilterSetObject.isFltrSet(fltr):
-            # TODO
-            return 0
+            if fltr in fltrsetDirectory:
+                r=AutNumRule.matchFilter(fltrsetDirectory[fltr].filter, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+                if r == 0:
+                    return 0
+                return AutNumRule.matchFilter(fltrsetDirectory[fltr].mp_filter, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
+            else:
+                return 10
 
         elif RouteSetObject.isRouteSet(fltr):
             # TODO
-            return 0
+            return 11
 
-        # Dunno, return True
-        return 0
+        # TODO <regular expression>
+
+        # Dunno, return False
+        common.w("Can not parse filter:", fltr)
+        return 12
 
 
     def match(self, subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory,
@@ -873,7 +941,9 @@ class FilterSetObject(RpslObject):
 
     @staticmethod
     def isFltrSet(fltrsetid):
-        return False # TODO
+        """ Returs True when the name appears to be filter-set name (=key)
+        according to RPSL specs. """
+        return str(fltrsetid).upper().find('FLTR-') > -1
 
     def getKey(self):
         return self.filter_set
@@ -890,9 +960,6 @@ class FilterSetObject(RpslObject):
             f+=str(self.mp_filter)
         return 'FilterSetbject: %s -< %s'%(self.filter_set, f)
 
-    def match(self, prefix, originAS):
-        # TODO
-        return True
 
 class RouteSetObject(RpslObject):
     """ Internal representation of route-set RPSL object. """
@@ -912,10 +979,10 @@ class RouteSetObject(RpslObject):
                 self.route_set=v.strip().upper()
                 
             elif a==self.MEMBERS_ATTR:
-                self.members.append(v.strip().upper())
+                self.members+=[r.strip() for r in v.strip().split(',')]
 
             elif a==self.MP_MEMBERS_ATTR:
-                self.mp_members.append(v.strip().upper())
+                self.mp_members+=[r.strip() for r in v.strip().split(',')]
 
             else:
                 pass # ignore unrecognized lines
@@ -925,8 +992,9 @@ class RouteSetObject(RpslObject):
 
     @staticmethod
     def isRouteSet(rsid):
-        # TODO
-        return False
+        """ Returs True when the name appears to be route-set name (=key)
+        according to RPSL specs. """
+        return str(fltrsetid).upper().find('RS-') > -1
 
     def getKey(self):
         return self.route_set
@@ -1140,14 +1208,6 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
 
 
 
-def ripe_filter_violating_routes(matched_pfxes):
-    """ Filter routes from result of check_ripe_routes() that needs attention.
-    Return list of prefixes. """
-
-    for p in matched_pfxes:
-        if p[3]==3 or p[3]==4: # not match or not found
-            yield p[0]
-
 
 def ripe_gen_route_timeline(violators, ripe_days, bgp_days, ipv6=False):
     """ Generate timeline for each suspect route. """
@@ -1333,7 +1393,7 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
     return (path_vector, allinripe, status)
 
 
-def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None):
+def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None, pfx_with_matching_route=None):
     """
     Check paths during their travel in the RIPE region.
     Returns (path_vector, whole_path_in_ripe, status, status_per_as) where
@@ -1353,9 +1413,10 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None):
     prefix that it didnt imported in documented way...)
     """
     # Plan:
-    # load BGP dump, aut-num, as-set and filter-set pickles
-    # pick routes that belongs to RIPE and verify route object by
-    # calling check_ripe_route(path_vector, iana_dir, ripe_routes)
+    # load BGP dump, aut-num, as-set and *-set pickles
+    # pick routes that belongs to RIPE and instead of verifying route
+    # object by calling check_ripe_route(path_vector, iana_dir, ripe_routes)
+    # just match them in suppliled hash table (this is huge memory optimization)
     # If the result is 0 (=OK) then start checking the as-path:
     # for each AS from the right (= from beginning) find it's
     # aut-num object and check that it is being originated locally for
@@ -1369,8 +1430,11 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None):
     res=[]
 
     # Load data for a day
-    riperoutes_pkl=(ripe_route6_pickle(day) if ipv6 else ripe_route_pickle(day))
-    riperoutes=common.load_pickle(riperoutes_pkl)
+
+    
+    #riperoutes_pkl=(ripe_route6_pickle(day) if ipv6 else ripe_route_pickle(day))
+    #riperoutes=common.load_pickle(riperoutes_pkl)
+    # Memory optimization. See further.
 
     asset_dir = common.load_pickle(ripe_asset_pickle(day))
     autnum_dir = common.load_pickle(ripe_autnum_pickle(day))
@@ -1389,8 +1453,10 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None):
         if bestonly and not (path_vector[0] and '>' in path_vector[0]):
             continue
 
-        rc = check_ripe_route(path_vector, ianadir, riperoutes)
-        if rc[3] == 0 or rc[3] == 5: # if the route checks in RIPE DB or it is outside of RIPE region
+        #rc = check_ripe_route(path_vector, ianadir, riperoutes)
+        #if rc[3] == 0 or rc[3] == 5: # if the route checks in RIPE DB or it is outside of RIPE region
+        # memory optimization:
+        if path_vector[1] in pfx_with_matching_route:
             yield check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir,
                                   peeringset_dir, ipv6, myas)
         else:
@@ -1538,6 +1604,7 @@ def module_prepare_day(fn, d):
     common.d("Resulting dir:", tmpdir)
     try:
         # ripe.db.route
+        ros=None
         common.d("Parsing", tmpdir+RIPE_DB_ROUTE)
         if os.path.isfile(tmpdir+RIPE_DB_ROUTE):
             ros=RouteObjectDir(tmpdir+RIPE_DB_ROUTE, False)
@@ -1546,6 +1613,7 @@ def module_prepare_day(fn, d):
             raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTE)
 
         # ripe.db.route6
+        ros6=None
         common.d("Parsing", tmpdir+RIPE_DB_ROUTE6)
         if os.path.isfile(tmpdir+RIPE_DB_ROUTE6):
             ros6=RouteObjectDir(tmpdir+RIPE_DB_ROUTE6, True)
@@ -1588,8 +1656,19 @@ def module_prepare_day(fn, d):
         # ripe.db.route-set
         common.d("Parsing", tmpdir+RIPE_DB_ROUTESET)
         if os.path.isfile(tmpdir+RIPE_DB_ROUTESET):
-            fs=HashObjectDir(tmpdir+RIPE_DB_ROUTESET, RouteSetObject)
-            common.save_pickle(fs, ripe_routeset_pickle(d))
+            rs=HashObjectDir(tmpdir+RIPE_DB_ROUTESET, RouteSetObject)
+            # Add members from members-of in route objects
+            for r in ros.enumerateObjs():
+                for m in r.members:
+                    if m in rs.table:
+                        rs.table[m].members.append(r.getKey())
+
+            # Add members from members-of in route6 objects
+            for r in ros6.enumerateObjs():
+                for m in r.members:
+                    if m in rs.table:
+                        rs.table[m].mp_members.append(r.getKey())
+            common.save_pickle(rs, ripe_routeset_pickle(d))
         else:
             raise Exception("Missing file "+tmpdir+RIPE_DB_ROUTESET)
 
@@ -1607,16 +1686,17 @@ def module_prepare_day(fn, d):
         common.cleanup_path(tmpdir)
 
 
-def module_prepare_thread(tasks):
-    for t in tasks:
-        module_prepare_day(t[0], t[1])
-
-
 
 # Module interface
 
 def module_prepare(data_root_dir):
         """ Prepare datastructures for RPSL module. """
+        
+        def module_prepare_thread(tasks):
+            for t in tasks:
+                module_prepare_day(t[0], t[1])
+
+        
         out_days = []
         tasks = [[] for i in range(0,MAX_THREADS)]
 
@@ -1642,37 +1722,57 @@ def module_prepare(data_root_dir):
 
 
 
-def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
-    common.d("rpsl.module_run ripe_days:", ripe_days)
-    common.d("rpsl.module_run bgp_days:", bgp_days)
+def module_run_day(day, ianadir, host, bgp_days, ipv6):
+    # TODO multithreading
+    pass
 
+
+def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
+    """
+    Module main interface.
+    TODO descr Plan:
+    TODO multithreading
+    """
+    
     route_totals=[]
     route_violators={}
     path_totals=[]
     path_totals_detail=[]
     for d in ripe_days:
+        common.d('Working on data for day:', str(d))
         if d in bgp_days: # test if we have BGP data for the day
             # check routes
+            pfx_path_check_worthy={}
             res=None
             bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
             if not os.path.isfile(bgp2routesfn):
-                common.d("Creating file", bgp2routesfn)
+                common.d("Checking routes. Creating file", bgp2routesfn)
                 res=list(check_ripe_routes(d, ianadir, host, ipv6, True))
                 common.save_pickle(res, bgp2routesfn)
             else:
                 res=common.load_pickle(bgp2routesfn)
 
-            for v in ripe_filter_violating_routes(res):
-                if not v in route_violators:
-                    route_violators[v]=True
+            # filter violators
+            for r in res:
+                if r[3]==3 or r[3]==4: # not match or not found
+                    route_violators[r[0]] = True
+
+            # filter routes to be checked by path_check
+            for r in res:
+                if r[3] == 0 or r[3] == 5: # match or non-RIPE (=unknown)
+                    pfx_path_check_worthy[r[0]] = True
 
             route_totals.append(report_ripe_routes_day(res, d, common.resultdir(d), ipv6))
+
+            # free bgp2routes
+            del res
+            gc.collect()
 
             # check paths
             bgp2pathsfn=common.resultdir(d)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
             if not os.path.isfile(bgp2pathsfn):
-                common.d("Creating file", bgp2pathsfn)
-                res=list(check_ripe_paths(d, ianadir, host, ipv6, True, MY_ASN))
+                common.d("Checking paths. Creating file", bgp2pathsfn)
+                res=list(check_ripe_paths(d, ianadir, host, ipv6, True, MY_ASN, pfx_path_check_worthy))
                 common.save_pickle(res, bgp2pathsfn)
             else:
                 res=common.load_pickle(bgp2pathsfn)
@@ -1771,6 +1871,12 @@ def main():
                                autnum_dir, asset_dir, routeset_dir, fltrset_dir, False)
         print str(r)
 
+
+    def test_filters():
+        # TODO filter tests
+        pass
+    
+
 #    test_routes()
 #    test_autnums()
 #    test_assets()
@@ -1778,7 +1884,7 @@ def main():
 #    test_routesets()
     test_peeringsets()
     test_autnum()
-
+    test_filters()
 
 
 if __name__ == '__main__':
