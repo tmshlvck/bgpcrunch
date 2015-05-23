@@ -253,7 +253,6 @@ class RouteObjectDir(object):
 
 # Aut-num object machinery
 
-EXPRESSION_DECODE=re.compile('^([^\{\}]{5,}.*|\{(.+)\}(\s+REFINE .*|\s+EXCEPT .*)?)$')
 FACTOR_SPLIT_ACCEPT='ACCEPT'
 FACTOR_SPLIT_ANNOUNCE='ANNOUNCE'
 FACTOR_SPLIT_NETWORKS='NETWORKS'
@@ -303,6 +302,11 @@ class AutNumRule(object):
 
                 if gotgroup and brc == 0:
                     return text[1:i].strip()
+
+                beg=text[i:]
+                if beg.startswith('REFINE') or beg.startswith('EXCEPT'):
+                    return text[:i-1].strip()
+                
             else:
                 if brc != 0:
                     raise Exception("Brace count does not fit in rule: "+text)
@@ -311,50 +315,36 @@ class AutNumRule(object):
 
 
         # split line to { factor1; factor2; ... } and the rest (refinements etc)
-#        m=EXPRESSION_DECODE.match(text)
+        e=_getFirstGroup(text.strip())
 
-        if True:
-            e=_getFirstGroup(text.strip())
-
-#            e=None
-#            # ignore refinements and excepts and count on case insensitivity of RPSL
-#            if m.group(1):
-#                e=m.group(1).strip()
-#            elif m.group(0):
-#                e=m.group(0).strip()
-#            else:
-#                raise Exception('Can not find needed groups in split of expression: '+text)
-
-            # defaults for rules like: export: default to AS1234
-            sel=e
-            fltr=''
-            if e.find(FACTOR_SPLIT_ACCEPT)>-1:
-                [sel,fltr] = e.split(FACTOR_SPLIT_ACCEPT, 1)
-                fltr=(FACTOR_SPLIT_ACCEPT+' '+fltr).strip()
-            elif e.find(FACTOR_SPLIT_ANNOUNCE)>-1:
-                [sel,fltr] = e.split(FACTOR_SPLIT_ANNOUNCE, 1)
-                fltr=(FACTOR_SPLIT_ANNOUNCE+' '+fltr).strip()
-            elif e.find(FACTOR_SPLIT_NETWORKS)>-1:
-                [sel,fltr] = e.split(FACTOR_SPLIT_NETWORKS, 1)
-                fltr=(FACTOR_SPLIT_NETWORKS+' '+fltr).strip()
+        # defaults for rules like: export: default to AS1234
+        sel=e
+        fltr=''
+        if e.find(FACTOR_SPLIT_ACCEPT)>-1:
+            [sel,fltr] = e.split(FACTOR_SPLIT_ACCEPT, 1)
+            fltr=(FACTOR_SPLIT_ACCEPT+' '+fltr).strip()
+        elif e.find(FACTOR_SPLIT_ANNOUNCE)>-1:
+            [sel,fltr] = e.split(FACTOR_SPLIT_ANNOUNCE, 1)
+            fltr=(FACTOR_SPLIT_ANNOUNCE+' '+fltr).strip()
+        elif e.find(FACTOR_SPLIT_NETWORKS)>-1:
+            [sel,fltr] = e.split(FACTOR_SPLIT_NETWORKS, 1)
+            fltr=(FACTOR_SPLIT_NETWORKS+' '+fltr).strip()
+        else:
+            if defaultRule: # default: rule does not need to include filter, then default to ANY
+                fltr='ANY'
             else:
-                if defaultRule: # default: rule does not need to include filter, then default to ANY
-                    fltr='ANY'
-                else:
-                    common.w("Syntax error: Can not find selectors in:", e, "decomposing expression:", text)
+                common.w("Syntax error: Can not find selectors in:", e, "decomposing expression:", text)
                 #raise Exception("Can not find selectors in: "+e)
 
-            if sel.find(FACTOR_SPLIT_FROM)>-1:
-                return ([str(FACTOR_SPLIT_FROM+f).strip() for f in sel.split(FACTOR_SPLIT_FROM)[1:]], fltr)
+        if sel.find(FACTOR_SPLIT_FROM)>-1:
+            return ([str(FACTOR_SPLIT_FROM+f).strip() for f in sel.split(FACTOR_SPLIT_FROM)[1:]], fltr)
 
-            elif sel.find(FACTOR_SPLIT_TO)>-1:
-                return ([str(FACTOR_SPLIT_TO+f).strip() for f in sel.split(FACTOR_SPLIT_TO)[1:]], fltr)
-            
-            else:
-                raise Exception("Can not find filter factors in: "+sel)
-                
+        elif sel.find(FACTOR_SPLIT_TO)>-1:
+            return ([str(FACTOR_SPLIT_TO+f).strip() for f in sel.split(FACTOR_SPLIT_TO)[1:]], fltr)
+
         else:
-            raise Exception("Can not split expression: "+text)
+            raise Exception("Can not find filter factors in: "+sel)
+
 
     @staticmethod
     def _normalizeFactor(selector, fltr):
@@ -634,7 +624,8 @@ class AutNumRule(object):
                 return 0
             else:
                 return 7
-        
+
+        # ASN (= i.e. AS1)
         elif AutNumRule.isASN(fltr):
             if fltr == origin:
                 #common.d("True, fltr ASN == origin", origin)
@@ -643,8 +634,11 @@ class AutNumRule(object):
                 #common.d("False, fltr ASN != origin f:", fltr, 'o:', origin)
                 return 4
 
+        # as-set
         elif AsSetObject.isAsSet(fltr):
             if fltr in assetDirectory.table:
+                # special recursion is used for speedup (otherwise
+                # recursion in this method could do the job)
                 if assetDirectory.table[fltr].recursiveMatch(origin, assetDirectory):
                     #common.d('True, as-set recursive match f:', fltr, 'o:', origin)
                     return 0
@@ -655,12 +649,14 @@ class AutNumRule(object):
                 #common.d('False, as-set not known. f:', fltr, 'o:', origin)
                 return 6
 
+        # prefix filter (= i.e. { 1.2.3.0/16^23-24 })
         elif AutNumRule.isPfxFilter(fltr):
             if AutNumRule.matchPfxFltr(fltr, prefix, ipv6):
                 return 0
             else:
                 return 8
 
+        # filter-set
         elif FilterSetObject.isFltrSet(fltr):
             if fltr in fltrsetDirectory.table:
                 if ipv6:
@@ -672,11 +668,12 @@ class AutNumRule(object):
             else:
                 return 10
 
+        # route-set
         elif RouteSetObject.isRouteSet(fltr):
             if fltr in rtsetDirectory.table:
                 members=(rtsetDirectory.table[fltr].mp_members if ipv6 else rtsetDirectory.table[fltr].members)
                 for m in members:
-                    if isPfx(m): # prefix or prefix range
+                    if AutNumRule.isPfx(m): # prefix or prefix range
                         if AutNumRule.matchFilter('{ '+m+' }', prefix, currentAsPath, assetDirectory,
                                                   fltrsetDirectory, rtsetDirectory, ipv6) == 0:
                             return 0
@@ -694,12 +691,21 @@ class AutNumRule(object):
             else:
                 return r
 
-        elif fltr.find('COMMUNITY(') > -1:
+        # can not decide communities -> DUNNO
+        elif fltr.find('COMMUNITY(') > -1 or fltr.find('COMMUNITY.CONTAINS(') > -1:
             return 22
+        
+        # list of identifiers (= from AS666 accept AS1 AS2 AS-HELL)
+        elif len(fltr.split())>1:
+            for g in fltr.split():
+                if AutNumRule.matchFilter(g, prefix, currentAsPath, assetDirectory,
+                                          fltrsetDirectory, rtsetDirectory, ipv6) == 0:
+                    return 0
+            return 4 # most common use case is listing ASNs, therefore inherit ASN failure code
 
         # Dunno, return False
         common.w("Can not parse filter:", fltr, 'hint pfx:', prefix, 'aspath:', currentAsPath)
-        # TODO
+        # TODO rm
         global filterdebug
         common.w("Filter debug:", filterdebug)
         return 20
@@ -743,7 +749,7 @@ class AutNumRule(object):
             ((not ipv6) and res[0] != 'IPV4.UNICAST')):
                 return 1
 
-        # TODO
+        # TODO rm
         global filterdebug
 
         # Walk through factors and find whether there is subject match,
@@ -753,13 +759,13 @@ class AutNumRule(object):
 
             if self.isASN(f[0]):
                 if f[0] == subject:
-                    # TODO
+                    # TODO rm
                     filterdebug=f
                     return AutNumRule.matchFilter(f[1], prefix, currentAsPath, assetDirectory,
                                                   fltrsetDirectory, rtsetDirectory, ipv6)
 
             elif AsSetObject.isAsSet(f[0]):
-                # TODO
+                # TODO rm
                 filterdebug=f
                 if f[0] in assetDirectory.table:
                     if assetDirectory.table[f[0]].recursiveMatch(subject, assetDirectory):
@@ -767,7 +773,7 @@ class AutNumRule(object):
                                                       fltrsetDirectory, rtsetDirectory, ipv6)
 
             elif PeeringSetObject.isPeeringSet(f[0]):
-                # TODO
+                # TODO rm
                 filterdebug=f
                 if f[0] in prngsetDirectory.table:
                     if prngsetDirectory.table[f[0]].recursiveMatch(subject, prngsetDirectory):
@@ -948,6 +954,16 @@ class AsSetObject(RpslObject):
         return self.as_set
 
     def recursiveMatch(self, target, hashObjDir, recursionList=None):
+        """
+        This methods does recusion in the objects members and tries to find match
+        with the target identifier.
+
+        This is being used by filter matching instead of full filter recursion because we
+        know that this type of object could hold only ASNs or references to another
+        as-sets and therefore full filter recursion is not needed and this special
+        recursion offers mild speedup.
+        """
+        
         if recursionList == None:
             recursionList = []
         
@@ -1016,11 +1032,20 @@ class PeeringSetObject(RpslObject):
         return self.peering_set
 
     def recursiveMatch(self, target, hashObjDir, recursionList=None):
+        """
+        This methods does recusion in the objects peering and mp-peering sections
+        and tries to find match with the target identifier.
+
+        This is being used by filter matching instead of full filter recursion because we
+        know that this type of object could hold only ASNs or references to another
+        peering-sets and therefore full filter recursion is not needed and this special
+        recursion offers mild speedup.
+        """
         if recursionList == None:
             recursionList = []
         
-#        common.d("PeeringSetObject recursiveMatch: target", target, 'in', self.getKey(),
-#                 'recursionList', recursionList)
+        #common.d("PeeringSetObject recursiveMatch: target", target, 'in', self.getKey(),
+        #          'recursionList', recursionList)
 
         # prevent recusion loop
         if self.getKey() in recursionList:
@@ -1397,7 +1422,23 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
     object for the asn and check filters based on prefix that is being checked
     and current_aspath.
 
-    TODO descr
+    The check consists of walking through import filters and checking whether
+    there is a filter that would allow import of the prefix from previous_as
+    taking into account the current_aspath that is constructed to be supposedly the
+    same as it is seen from the perspective of the ASN. And to the same check
+    for the outgoing direction from the AS using export filters for the next_as.
+
+    Checks are aware of as-path prepending (the half-step is OK automatically when
+    it is from and to the same AS in either import or export direction or the whole
+    step is OK when all three ASNs are the same, i.e. when checking one of the inner
+    occurences of AS1 in as-path like this: AS2 AS1 AS1 AS1 AS1 AS3.
+
+    Originating AS is checked only in export direction (previous_as has to be None).
+    Last AS in the chain (which is actually the last AS before AS of the observer)
+    is checked only in import direction when the next_as is None. But there is possibility
+    that the calling function might know the AS and put it in. It would cause that export
+    filters in the left-most AS are checked as well. (But the observer's AS filters are not
+    checked anyway.)
 
     Returns:
     0 = step match (=OK)
@@ -1408,10 +1449,9 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
     300 = can not find matching rule, otherwise subtract 300 and see matchFilter()
     400-499 = export match filter failure
     400 = can not find matchin rule, otherwise subtract 400 and see matchFilter()
-    
     """
 
-    #common.d('Checking path for', pfx, 'step from', previous_as, 'to', next_as, 'via', asn)
+    common.d('Checking path for', pfx, 'step from', previous_as, 'to', next_as, 'via', asn)
 
     if asn in autnum_dir.table:
         autnum=autnum_dir.table[asn]
@@ -1503,25 +1543,24 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
     status  = []
     allinripe = True
 
-    #common.d('Checking path for ', str(path_vector))
+    common.d('Checking path for ', str(path_vector))
     # go through as-path one by one AS and check routes
     for i,asn in enumerate(aspath):
         next_as = (aspath[i-1] if i>0 else myas)
 
         previous_as = (aspath[i+1] if (i+1)<len(aspath) else None)
-        
+
         res = check_ripe_path_step(path_vector[1], asn, aspath[i+1:], previous_as, next_as,
                                    autnum_dir, asset_dir, routeset_dir, filterset_dir, prngset_dir, ipv6)
-
         if res == 2: # means that the ASN is out of RIPE region
             allinripe = False
 
-#        if res == 0:
-#            common.d("Step OK.")
-#        else:
-#            common.d("Step failed:", str(res))
-#
-#        status.append((asn, res))
+        if res == 0:
+            common.d("Step OK.")
+        else:
+            common.d("Step failed:", str(res))
+
+        status.append((asn, res))
 
     return (path_vector, allinripe, status)
 
@@ -1717,6 +1756,11 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
         of.write("%s: %d\n"%('Total export filter not-found', total_export_notfound))
         of.write("%s: %d\n"%('Total export filter invalid', total_export_fltrfail))
 
+
+    # TODO create another file with more thorough statistic of failures
+    # failure count - pathlen -> prefixes total, prefixes with one failure, two, ..., pathlen
+    # failure matrix - pathlen -> prefixes total, failed in first, ..., failed in pathlen
+
     return ((total_pfx_ok, total_pfx_dunno, total_pfx_fail),
             (total_hops_ok, total_hops_dunno,
              total_import_notfound, total_export_notfound,
@@ -1880,9 +1924,7 @@ def module_prepare(data_root_dir):
 
 
 def module_run_day(day, ianadir, host, bgp_days, ipv6, route_totals, route_violators,
-                   path_totals, path_totals_detail, lock):
-    # TODO multithreading
-    
+                   path_totals, path_totals_detail, lock):   
     # check routes
     pfx_path_check_worthy={}
     res=None
