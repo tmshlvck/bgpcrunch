@@ -138,7 +138,7 @@ def gen_pathlen_textfile(buckets,outfile,ipv6):
 
          
 def gen_pathlen_graph(buckets,outfile,ipv6):
-    """ TODO doc """
+    """ Generate graph from buckets of each day. Graph pathlengths (one point per day). """
     
     common.d('gen_pathlen_graph genering', outfile)
     graph.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],outfile)
@@ -299,7 +299,24 @@ def decode_bgp_filename(filename):
 # Module interface
 
 
-def module_prepare(bgp_hosts, bgp_data, ipv6=False):
+def module_listdays(bgp_hosts, bgp_data, ipv6=False):
+    """
+    Enumerate days that the module can analyze.
+
+    bgp_hosts: list of hostnames
+    bgp_data: hash bgp_host -> source directory
+    ipv6: flag
+
+    Returns generator of list of tuples (Day,filename).
+    """
+
+    for host in bgp_hosts:
+        for fn in common.enumerate_files(bgp_data[host], "bgp-%s-[0-9-]+\.txt.bz2"%
+                                         ("ipv6" if ipv6 else "ipv4")):
+            yield (common.Day(decode_bgp_filename(fn)[1:4]), fn)
+
+
+def module_preprocess(bgp_hosts, bgp_data, ipv6=False):
         """
         Runs Cisco parser and parse files from data like
         data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
@@ -314,25 +331,21 @@ def module_prepare(bgp_hosts, bgp_data, ipv6=False):
         out_days = []
 
         for host in bgp_hosts:
-                for fn in common.enumerate_files(bgp_data[host], "bgp-%s-[0-9-]+\.txt.bz2"%
-                                                 ("ipv6" if ipv6 else "ipv4")):
-                        t = common.Day(decode_bgp_filename(fn)[1:4])
-                        out_days.append(t)
-                        common.d('BGP in:', fn, 'time:', t)
-                        outdir = common.resultdir(t)
-                        outfile = bgpdump_pickle(t, host, ipv6, False)
+            for t,fn in module_listdays(bgp_hosts, bgp_data, ipv6):
+                common.d('BGP in:', fn, 'time:', t)
+                outdir = common.resultdir(t)
+                outfile = bgpdump_pickle(t, host, ipv6, False)
 
-                        if os.path.isfile(outfile):
-                                common.d('BGP out:', outfile, 'exists. Skip.')
-                        else:
-                                common.d('BGP out:', outfile)
-                                cisco.gen_bgpdump_pickle(fn, outfile, ipv6)
-        return out_days
+                if os.path.isfile(outfile):
+                    common.d('BGP out:', outfile, 'exists. Skip.')
+                else:
+                    common.d('BGP out:', outfile)
+                    cisco.gen_bgpdump_pickle(fn, outfile, ipv6)
 
 
 
 
-def module_run(host, days, ipv6=False):
+def module_postprocess(host, days, ipv6=False):
     """ Main function to be called from run_all. Returns nothing but generates a lot of result files. """
     m=create_path_matrix(host, days, ipv6)
     gen_pathlen_timegraphs(m, common.resultdir(), ipv6)
@@ -346,13 +359,8 @@ def module_run(host, days, ipv6=False):
         gen_pathlen_graph(m[d], outfilepfx, ipv6)
         
 
-            
 
-#################################
-
-
-
-
+# Testing and command-line interface
 
 def main():
     def usage():

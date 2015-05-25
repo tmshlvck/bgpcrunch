@@ -205,6 +205,17 @@ def save_pickle(obj, outfile):
 
     return obj
 
+
+def intersect(l1, l2):
+    """
+    Intersect two lists (this should be used for intersecting
+    lists of Day objects.)
+    """
+    
+    for i in l1:
+        if i in l2:
+            yield i
+
     
 # Exported classes
 

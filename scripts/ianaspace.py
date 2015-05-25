@@ -81,7 +81,7 @@ class IanaDirectory(object):
 
 
 
-def module_run(ianadir, host, days, ipv6=False, bestonly=False):
+def module_process(ianadir, host, days, ipv6=False, bestonly=False):
         timeline=[]
         timelineavg=[]
 
@@ -109,7 +109,8 @@ def module_run(ianadir, host, days, ipv6=False, bestonly=False):
                                 rirpfxlens[name]=[]
                         rirpfxlens[name].append(net.prefixlen)
                 timeline.append([str(t)]+[len(rirpfxlens[n]) for n in RIRS])
-                timelineavg.append([str(t)]+[float(reduce(lambda x, y: x + y, rirpfxlens[n]))/len(rirpfxlens[n]) for n in RIRS])
+                timelineavg.append([str(t)]+[reduce(lambda x, y: x + y, rirpfxlens[n])/
+                                             float(len(rirpfxlens[n])) for n in RIRS])
 
                 outtxt = '%s/rirstats%d-%s.txt'%(common.resultdir(t), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR stats text "+outtxt)
@@ -129,6 +130,7 @@ def module_run(ianadir, host, days, ipv6=False, bestonly=False):
         
 
 
+# Module test interface
 
 def main():
         import sys

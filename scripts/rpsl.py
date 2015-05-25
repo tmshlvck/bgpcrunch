@@ -57,8 +57,8 @@ RIPE_DB_PEERINGSET_PICKLE='/ripe.peeringset.pickle'
 
 RIPE_BGP2ROUTES4_TXT='/bgp2routes.txt'
 RIPE_BGP2ROUTES4_PICKLE='/bgp2routes.pickle'
-RIPE_BGP2ROUTES6_TXT='/bgp2routes.txt'
-RIPE_BGP2ROUTES6_PICKLE='/bgp2routes.pickle'
+RIPE_BGP2ROUTES6_TXT='/bgp2routes6.txt'
+RIPE_BGP2ROUTES6_PICKLE='/bgp2routes6.pickle'
 
 RIPE_BGP2PATHS4_TXT='/bgp2paths.txt'
 RIPE_BGP2PATHS4_PICKLE='/bgp2paths.pickle'
@@ -534,7 +534,7 @@ class AutNumRule(object):
         return 13
             
     @staticmethod
-    def matchFilter(fltr, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False):
+    def matchFilter(fltr, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6=False, recursion_list=None):
         """ Matches filter fltr to prefix with currentAsPath.
         Using assetDirectory, fltrsetDirectory and rtsetDirectory.
 
@@ -550,6 +550,7 @@ class AutNumRule(object):
         10 unknown fltr-set
         11 unkown route-set or route-set not match
         13 regexp failed to validate
+        14 empty filter (None or '')
         20 unknown filter (=dunno)
         21 unknown regexp (=dunno)
         22 community can not be decided (=dunno)
@@ -558,6 +559,8 @@ class AutNumRule(object):
         #common.d("Matching filter", fltr, 'prefix', prefix, 'currentAsPath', str(currentAsPath))
 
         origin=(currentAsPath[-1].strip() if currentAsPath else '')
+        if not fltr:
+            return 14 # empty filter -> fail
         fltr=fltr.strip()
 
 
@@ -671,7 +674,18 @@ class AutNumRule(object):
         # route-set
         elif RouteSetObject.isRouteSet(fltr):
             if fltr in rtsetDirectory.table:
-                members=(rtsetDirectory.table[fltr].mp_members if ipv6 else rtsetDirectory.table[fltr].members)
+                rts = rtsetDirectory.table[fltr]
+
+                # prevent infinite recursion
+                rcl = (recursion_list if recursion_list else [])
+                if rts.getKey() in rcl:
+                    return 11
+                rcl.append(rts.getKey())
+
+                # recursively resolve members
+                # this needs own recursion because contents might be
+                # another route-set, as-set and/or IP range
+                members=(rts.mp_members if ipv6 else rts.members)
                 for m in members:
                     if AutNumRule.isPfx(m): # prefix or prefix range
                         if AutNumRule.matchFilter('{ '+m+' }', prefix, currentAsPath, assetDirectory,
@@ -679,7 +693,7 @@ class AutNumRule(object):
                             return 0
                     else: # recursion (might contain another route-set, as-set or ASN)
                         if AutNumRule.matchFilter(m, prefix, currentAsPath, assetDirectory,
-                                                  fltrsetDirectory, rtsetDirectory, ipv6) == 0:
+                                                  fltrsetDirectory, rtsetDirectory, ipv6, rcl) == 0:
                             return 0
             return 11
 
@@ -1362,7 +1376,7 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
 
 
 
-def ripe_gen_route_timeline(violators, ripe_days, bgp_days, ipv6=False):
+def ripe_gen_route_timeline(violators, days, ipv6=False):
     """ Generate timeline for each suspect route. """
 
     timeline={}
@@ -1370,17 +1384,16 @@ def ripe_gen_route_timeline(violators, ripe_days, bgp_days, ipv6=False):
     for v in violators:
         timeline[v]=[]
     
-    for d in sorted(ripe_days):
-        if d in bgp_days: # test if we have BGP data for the day
-            common.d("ripe_gen_route_timeline: Working on day %s"%str(d))
-            bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
-            dayres=common.load_pickle(bgp2routesfn)
-            # dayres contains list of tuples (prefix, as-path, routeObj or None, status)
+    for d in sorted(days):
+        common.d("ripe_gen_route_timeline: Working on day %s"%str(d))
+        bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
+        dayres=common.load_pickle(bgp2routesfn)
+        # dayres contains list of tuples (prefix, as-path, routeObj or None, status)
 
-            for rv in dayres:
-                if rv[0] in timeline:
-                    if len(timeline[rv[0]])==0 or timeline[rv[0]][-1] != rv[1:]:
-                        timeline[rv[0]].append(tuple([d]+list(rv)))
+        for rv in dayres:
+            if rv[0] in timeline:
+                if len(timeline[rv[0]])==0 or timeline[rv[0]][-1] != rv[1:]:
+                    timeline[rv[0]].append(tuple([d]+list(rv)))
 
     return timeline
 
@@ -1451,7 +1464,7 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
     400 = can not find matchin rule, otherwise subtract 400 and see matchFilter()
     """
 
-    common.d('Checking path for', pfx, 'step from', previous_as, 'to', next_as, 'via', asn)
+    #common.d('Checking path for', pfx, 'step from', previous_as, 'to', next_as, 'via', asn)
 
     if asn in autnum_dir.table:
         autnum=autnum_dir.table[asn]
@@ -1532,7 +1545,11 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
     Chech path in path vector by means of resolving all aut-num
     object and filters along the as-path in the path_vector from BGP.
 
-    TODO descr
+    Walk trhough as-path and call check_path_step for each ASN in as-path
+    feeding preceeding and following ASNs in as-path as well as the
+    as-path slice that represents what should be seen by the checked ASN.
+
+    See check_ripe_path_step() for details.
     """
     
     # assert...
@@ -1543,7 +1560,7 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
     status  = []
     allinripe = True
 
-    common.d('Checking path for ', str(path_vector))
+    #common.d('Checking path for ', str(path_vector))
     # go through as-path one by one AS and check routes
     for i,asn in enumerate(aspath):
         next_as = (aspath[i-1] if i>0 else myas)
@@ -1556,9 +1573,11 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
             allinripe = False
 
         if res == 0:
-            common.d("Step OK.")
+            pass
+            #common.d("Step OK.")
         else:
-            common.d("Step failed:", str(res))
+            pass
+            #common.d("Step failed:", str(res))
 
         status.append((asn, res))
 
@@ -1577,6 +1596,7 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None, p
 
     status list:
     0 = match (=OK)
+    -1 = route obj failed, do not check path
     1 = route uncheckable (local or aggregate... =uncheckable)
     2 = ASN outside of RIPE NCC region (=uncheckable)
     300-399 = prevASN not found or prevASN filter failed
@@ -1633,9 +1653,9 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None, p
                                   peeringset_dir, ipv6, myas)
         else:
 #            common.d("Origin does not match... No point in checking the path.", path_vector)
-            status  = [(asn, 0) for asn in normalize_aspath(path_vector[3])]
+            status  = [(asn, 1) for asn in normalize_aspath(path_vector[3])] # 1=dunno
             if status:
-                status[-1] = (status[-1][-1], 1) # 1=route object failure or uncheckable route,
+                status[-1] = (status[-1][0], -1) # route object failure
             # either local route or aggregate route generated in some remote location
             yield (path_vector, True, status)
 
@@ -1648,10 +1668,13 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
     """
     Generate meaningful report 
     0 = match (=OK)
+    -1 = route object failed, do not check
     1 = route uncheckable (local or aggregate... =uncheckable)
     2 = ASN outside of RIPE NCC region (=uncheckable)
     300-399 = prevASN not found or prevASN filter failed
-    400-499 = nextASN not found or nextASN filter failed  (might be suppressed
+    400-499 = nextASN not found or nextASN filter failed  (might be suppressed)
+    ...
+    See check_ripe_paths() for details.
     """
 
     total_pfx=0
@@ -1687,10 +1710,15 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                     total_hops_ok += 1
                     ts = 'OK'
 
+                elif s == -1:
+                    total_hops_dunno += 1
+                    dunno = True
+                    ts = 'Route obj failed, no-go check path'
+
                 elif s == 1:
                     total_hops_dunno += 1
                     dunno = True
-                    ts = 'LOCAL/AGGR (=dunno)'
+                    ts = 'LOCAL/AGGR/no-check (=dunno)'
 
                 elif s == 2:
                     total_hops_dunno += 1
@@ -1783,7 +1811,7 @@ def module_prepare_day(fn, d):
         os.path.isfile(ripe_filterset_pickle(d)) and
         os.path.isfile(ripe_routeset_pickle(d)) and
         os.path.isfile(ripe_peeringset_pickle(d))):
-        common.d("Skipping dir", d, "because we have all needed results.")
+        common.d("RPSL preprocess: Skipping dir", d, "because we have all needed results.")
         return
 
     common.d("Unpacking file", fn, "for time", d, ".")
@@ -1850,7 +1878,7 @@ def module_prepare_day(fn, d):
                     if m in rs.table:
                         rs.table[m].members.append(r.getKey())
                     else:
-                        common.w("Can not find route-set for member-of", m, "in", r.getKey())
+                        common.w("Can not find route-set for member-of", m, "in route", r.getKey())
 
             # Add members from members-of in route6 objects
             for r in ros6.enumerateObjs():
@@ -1881,7 +1909,19 @@ def module_prepare_day(fn, d):
 
 # Module interface
 
-def module_prepare(data_root_dir):
+def module_listdays(data_root_dir):
+    """
+    Enumerate days that the module can analyze.
+
+    Returns generator of list of tuples (Day,filename).
+    """
+    
+    for fn in common.enumerate_files(data_root_dir+'/ripe','ripedb-[0-9-]+\.tar\.bz2'):
+        d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
+        yield (d,fn)
+
+
+def module_preprocess(data_root_dir):
         """
         Prepare datastructures for RPSL module.
         Run in multiple threads if MAX_PREP_THREADS allows it.
@@ -1897,13 +1937,10 @@ def module_prepare(data_root_dir):
             for t in tasks:
                 module_prepare_day(t[0], t[1])
 
-        
-        out_days = []
         tasks = [[] for i in range(0,MAX_PREP_THREADS)]
 
-        for i,fn in enumerate(common.enumerate_files(data_root_dir+'/ripe','ripedb-[0-9-]+\.tar\.bz2')):
+        for i,(d,fn) in enumerate(module_listdays(data_root_dir)):
             d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
-            out_days.append(d)
 
             tasks[i%MAX_PREP_THREADS].append((fn,d))
 
@@ -1919,12 +1956,9 @@ def module_prepare(data_root_dir):
         else: # no threading
             module_prepare_thread(tasks[0])
 
-        return out_days
 
 
-
-def module_run_day(day, ianadir, host, bgp_days, ipv6, route_totals, route_violators,
-                   path_totals, path_totals_detail, lock):   
+def module_process_day(day, ianadir, host, ipv6):
     # check routes
     pfx_path_check_worthy={}
     res=None
@@ -1936,21 +1970,12 @@ def module_run_day(day, ianadir, host, bgp_days, ipv6, route_totals, route_viola
     else:
         res=common.load_pickle(bgp2routesfn)
 
-    # filter violators
-    lock.acquire(True)
-    for r in res:
-        if r[3]==3 or r[3]==4: # not match or not found
-            route_violators[r[0]] = True
-    lock.release()
-
     # filter routes to be checked by path_check
     for r in res:
         if r[3] == 0 or r[3] == 5: # match or non-RIPE (=unknown)
             pfx_path_check_worthy[r[0]] = True
 
-    lock.acquire(True)
-    route_totals.append(report_ripe_routes_day(res, day, common.resultdir(day), ipv6))
-    lock.release()
+
 
     # free bgp2routes
     del res
@@ -1973,20 +1998,20 @@ def module_run_day(day, ianadir, host, bgp_days, ipv6, route_totals, route_viola
     lock.release()
 
 
-def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
+
+def module_process(days, ianadir, host, ipv6):
     """
     Module main interface.
 
     Plan:
     Expecting that all result directories has been poppulated with
     parsed sources from all BGP hosts as well as from RIPE data
-    beacuse call to module_prepare() has to come well before
-    call of module_run.
+    beacuse call to module_preprocess() has to come well before
+    call of module_process.
 
-    The module_run does two basic things:
-    First it visits each day in  the ripe_days if it is also in
-    bgp_days (= we have both data available) and runs in multiple
-    treads:
+    The module_process does two basic things:
+    First it visits each day in  the ripe_days (run in multiple threads
+    in paralel) and do:
     a) check all BGP path_vectors' origin in route-object lookup list
     constructed out of route or route6 objects in RIPE DB
     b) check all BGP path_vectors' as-paths and match filters
@@ -2000,44 +2025,82 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
     Running multiple instances concurrently might run out of resources.
     """
 
-    def module_run_thread(tasks):
+    def module_process_thread(tasks):
         for t in tasks:
-            return module_run_day(*t)
-    
-    route_totals=[]
-    route_violators={}
-    path_totals=[]
-    path_totals_detail=[]
-    lock=threading.Lock()
+            return module_process_day(*t)
+
 
     tasks=[[] for i in range(0,MAX_PARSE_THREADS)]
     thrindex=0
-    for d in ripe_days:
+    for d in days:
         common.d('Working on data for day:', str(d))
-        if d in bgp_days: # test if we have BGP data for the day
-            if MAX_PARSE_THREADS > 1:
-                tasks[thrindex%MAX_PARSE_THREADS].append((d, ianadir, host, bgp_days, ipv6,
-                                                          route_totals, route_violators,
-                                                          path_totals, path_totals_detail, lock))
-                thrindex+=1
-            else:
-                # run single-threaded worker
-                module_run_day(d, ianadir, host, bgp_days, ipv6, route_totals, route_violators,
-                               path_totals, path_totals_detail, lock)
+        if MAX_PARSE_THREADS > 1:
+            tasks[thrindex%MAX_PARSE_THREADS].append((d, ianadir, host, ipv6))
+            thrindex+=1
         else:
-            common.w('Missing BGP data for day %s'%str(d))
+            # run single-threaded worker
+            module_process_day(d, ianadir, host, ipv6)
+    else:
+        common.w('Missing BGP data for day %s and host %s'%(str(d),host))
 
     # run worker threads
     if MAX_PARSE_THREADS > 1:
         threads=[]
         for i in range(0,MAX_PREP_THREADS):
-            t=threading.Thread(target=module_run_thread, args=[tasks[i]])
+            t=threading.Thread(target=module_process_thread, args=[tasks[i]])
             t.start()
             threads.append(t)
 
         for t in threads:
             t.join()
 
+    
+def module_postprocess(ripe_days, ianadir, host, ipv6):
+    """
+    Module main interface. Run postprocess (generate graphs and text outputs).
+
+    Plan:
+    Expecting that all result directories has been poppulated with
+    check results form module_process just load the results and count
+    numbers for graphs and text outputs and write them.
+    """
+
+    route_totals=[]
+    route_violators={}
+    path_totals=[]
+    path_totals_detail=[]
+
+    # Load check route results
+    bgp2routesfn=common.resultdir(day)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
+    if os.path.isfile(bgp2routesfn):
+        res=common.load_pickle(bgp2routesfn)
+    else:
+        raise Exception('Can not load '+bgp2routesfn)
+
+    # Generate report for routes
+    route_totals.append(report_ripe_routes_day(res, day, common.resultdir(day), ipv6))
+
+    # Filter route violators
+    for r in res:
+        if r[3]==3 or r[3]==4: # not match or not found
+            route_violators[r[0]] = True
+
+    # free bgp2routes
+    del res
+    gc.collect()
+    res=None
+
+    # Load check paths results
+    bgp2pathsfn=common.resultdir(day)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
+    if os.path.isfile(bgp2pathsfn):
+        res=common.load_pickle(bgp2pathsfn)
+    else:
+        raise Exception('Can not load '+bgp2pathsfn)
+
+    path_res=report_ripe_paths_day(res, day, common.resultdir(day), ipv6)
+    path_totals.append(path_res[0])
+    path_totals_detail.append(path_res[1])
+    
     # Graph route totals
     if route_totals:
         common.d("Generating graph with pfx", common.resultdir()+'/bgp2routes'+('6' if ipv6 else '4'))
@@ -2046,7 +2109,7 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
     # Revisit common.resultdir(d)+RIPE_BGP2ROUTES_PICKLE for each day and cross check time to fix
     if route_violators:
         common.d("Crating route timeline...")
-        tl=ripe_gen_route_timeline(route_violators.keys(), ripe_days, bgp_days, ipv6)
+        tl=ripe_gen_route_timeline(route_violators.keys(), ripe_days, ipv6)
         report_route_timeline(tl, ipv6)
 
     # Graph path totals
@@ -2057,6 +2120,8 @@ def module_run(ripe_days, ianadir, host, bgp_days, ipv6):
     if path_totals_detail:
         common.d("Generating graph with pfx", common.resultdir()+'/bgp2paths-detail'+('6' if ipv6 else '4'))
         graph.gen_multilineplot(path_totals, common.resultdir()+'/bgp2paths-detail'+('6' if ipv6 else '4'), legend=RIPE_PATHS_MATCH_DET_LEGEND)
+
+
 
 
 # Unit test interface
