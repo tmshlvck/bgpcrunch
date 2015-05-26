@@ -2099,8 +2099,6 @@ def module_process(days, ianadir, host, ipv6, thrnum=1):
             # run single-threaded worker
             common.d('Considering data for day:', str(d), 'single-threaded.')
             module_process_day(d, ianadir, host, ipv6)
-    else:
-        common.w('Missing BGP data for day %s and host %s'%(str(d),host))
 
     # run worker threads
     if thrnum > 1:
