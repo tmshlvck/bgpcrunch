@@ -2024,10 +2024,21 @@ def module_preprocess(data_root_dir, thrnum=1):
 
 
 def module_process_day(day, ianadir, host, ipv6):
+    """
+    This function is executed from module_process in multiple threads.
+    This function executes check_ripe_routes() and check_ripe_paths()
+    for the day in question and saves the results in proper pikcle files.
+    Main function is creating the pickles eficiently - i.e. do not recreate
+    already-existing results.
+    """
+
+    # Output filenames
+    bgp2routesfn=common.resultdir(day)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
+    bgp2pathsfn=common.resultdir(day)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
+
     # check routes
     pfx_path_check_worthy={}
     res=None
-    bgp2routesfn=common.resultdir(day)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
     if not os.path.isfile(bgp2routesfn):
         common.d("Checking routes. Creating file", bgp2routesfn)
         res=list(check_ripe_routes(day, ianadir, host, ipv6, True))
@@ -2050,7 +2061,6 @@ def module_process_day(day, ianadir, host, ipv6):
     res=None
 
     # check paths
-    bgp2pathsfn=common.resultdir(day)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
     if not os.path.isfile(bgp2pathsfn):
         common.d("Checking paths. Creating file", bgp2pathsfn)
         res=list(check_ripe_paths(day, ianadir, host, ipv6, True, MY_ASN, pfx_path_check_worthy))
