@@ -255,8 +255,8 @@ class RouteObjectDir(object):
 FACTOR_SPLIT_ACCEPT='ACCEPT'
 FACTOR_SPLIT_ANNOUNCE='ANNOUNCE'
 FACTOR_SPLIT_NETWORKS='NETWORKS'
-FACTOR_SPLIT_FROM='FROM '
-FACTOR_SPLIT_TO='TO '
+FACTOR_SPLIT_FROM=re.compile('FROM\s+')
+FACTOR_SPLIT_TO=re.compile('TO\s+')
 AFI_MATCH=re.compile('^AFI\s+([^\s]+)\s+(.*)$')
 
 IMPORT_FACTOR_MATCH=re.compile('^FROM\s+([^\s]+)(\s+(.*)?\s?ACCEPT(.+))?$')
@@ -335,14 +335,14 @@ class AutNumRule(object):
                 common.w("Syntax error: Can not find selectors in:", e, "decomposing expression:", text)
                 #raise Exception("Can not find selectors in: "+e)
 
-        if sel.find(FACTOR_SPLIT_FROM)>-1:
-            return ([str(FACTOR_SPLIT_FROM+f).strip() for f in sel.split(FACTOR_SPLIT_FROM)[1:]], fltr)
+        if len(FACTOR_SPLIT_FROM.split(sel))>1:
+            return ([str('FROM '+f.strip()) for f in FACTOR_SPLIT_FROM.split(sel)[1:]], fltr)
 
-        elif sel.find(FACTOR_SPLIT_TO)>-1:
-            return ([str(FACTOR_SPLIT_TO+f).strip() for f in sel.split(FACTOR_SPLIT_TO)[1:]], fltr)
+        elif len(FACTOR_SPLIT_TO.split(sel))>1:
+            return ([str('TO '+f.strip()) for f in FACTOR_SPLIT_TO.split(sel)[1:]], fltr)
 
         else:
-            raise Exception("Can not find filter factors in: "+sel)
+            raise Exception("Can not find filter factors in: '"+sel+"' in text: "+text)
 
 
     @staticmethod
@@ -594,7 +594,7 @@ class AutNumRule(object):
             #common.d("AND recursion a:", fltr[:i], "b:", fltr[i+len(op):])
             a=AutNumRule.matchFilter(fltr[:i], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
             b=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
-            #common.d("Recusion result a:", a, "b", b)
+            #common.d("AND recusion result a:", a, "b", b)
             if a >= 20 or b >= 20:
                 return 20
             return (0 if a == 0 and b == 0 else 9)
@@ -604,7 +604,7 @@ class AutNumRule(object):
         if i>=0:
             #common.d("NOT recursion a:", fltr[:i])
             a=AutNumRule.matchFilter(fltr[i+len(op):], prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
-            #common.d("Recusion result a:", a)
+            #common.d("NOT recusion result a:", a)
             if a >= 20:
                 return 20
             return (0 if not a == 0 else 9)
@@ -754,7 +754,7 @@ class AutNumRule(object):
         if (not self.mp) and ipv6:
             return False
 
-        res=self._parseRule() # (afi, [(subject, filter)])
+        res=self._parseRule() # return (afi, [(subject, filter)])
 
         # Check address family matches
         if res[0] != 'ANY' and res[0] != 'ANY.UNICAST':
@@ -1500,11 +1500,11 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
                     if m>3:
                         status=m
 
-
         if not import_match:
 #            common.d('Invalid: Import match missing. Status:', str(status))
             return 300+status # import match missing
 
+        status=0
         if next_as == None: # AS is last in AS path and we do not know my AS
             export_match=True
         elif next_as == asn: # as-path prepend
@@ -2271,13 +2271,17 @@ def main():
 
         autnum_dir=HashObjectDir(autnum_testfile, AutNumObject)
         asset_dir=HashObjectDir(asset_testfile, AsSetObject)
-        routeset_dir=MockupDir()
-        fltrset_dir=MockupDir()
+        routeset_dir=HashObjectDir(routeset_testfile, RouteSetObject)
+        fltrset_dir=HashObjectDir(fltrset_testfile, FilterSetObject)
+        prngset_dir=HashObjectDir(peeringset_testfile, PeeringSetObject)
 
-#        r=check_ripe_path(['>', '1.2.3.0/24', '1 2 3 i'], autnum_dir, asset_dir, routeset_dir, fltrset_dir, False, None)
-#        print str(r)
-        r=check_ripe_path_step('1.2.3.0/24', 'AS29134', ['AS1', 'AS2', 'AS8422', 'AS29134'], 'AS16246', 'AS8422', # from AS16246 to AS8422
-                               autnum_dir, asset_dir, routeset_dir, fltrset_dir, False)
+        r=check_ripe_path(['>', '1.2.3.0/24', '1.2.3.4', '1 2 3 i'], autnum_dir, asset_dir, routeset_dir, fltrset_dir, False, None)
+        print str(r)
+
+        r=check_ripe_path_step('1.2.3.0/24', 'AS29134', ['AS1', 'AS2', 'AS8422', 'AS44672'],
+                               'AS6939', 'AS44672', # from AS6939 to AS44672 via AS29134
+                               autnum_dir, asset_dir, routeset_dir, fltrset_dir, prngset_dir, False)
+        
         print str(r)
 
 
@@ -2316,8 +2320,8 @@ def main():
 #    test_fltrsets()
 #    test_routesets()
 #    test_peeringsets()
-#    test_autnum()
-    test_filters()
+    test_autnum()
+#    test_filters()
 
 
 if __name__ == '__main__':
