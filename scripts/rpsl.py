@@ -36,9 +36,6 @@ filterdebug=None
 
 MY_ASN=None # or 'AS29134'
 
-MAX_PREP_THREADS=3
-MAX_PARSE_THREADS=1
-
 RIPE_DB_ROUTE='/ripe.db.route'
 RIPE_DB_ROUTE6='/ripe.db.route6'
 RIPE_DB_AUTNUM='/ripe.db.aut-num'
@@ -1991,10 +1988,10 @@ def module_listdays(data_root_dir):
         yield (d,fn)
 
 
-def module_preprocess(data_root_dir, thrnum=MAX_PREP_THREADS):
+def module_preprocess(data_root_dir, thrnum=1):
         """
         Prepare datastructures for RPSL module.
-        Run in multiple threads if thrnum/MAX_PREP_THREADS allows it.
+        Run in multiple threads if thrnum allows it.
         Beware: The parser generates huge files in temp dir (~3G per parser)
         and consumes huge ammount of memory (at least 1G per parser). Therefore
         concurrent execution could run out of resources.
@@ -2010,8 +2007,6 @@ def module_preprocess(data_root_dir, thrnum=MAX_PREP_THREADS):
         tasks = [[] for i in range(0,thrnum)]
 
         for i,(d,fn) in enumerate(module_listdays(data_root_dir)):
-            d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
-
             tasks[i%thrnum].append((fn,d))
 
         if thrnum > 1:
@@ -2038,7 +2033,10 @@ def module_process_day(day, ianadir, host, ipv6):
         res=list(check_ripe_routes(day, ianadir, host, ipv6, True))
         common.save_pickle(res, bgp2routesfn)
     else:
-        res=common.load_pickle(bgp2routesfn)
+        if not os.path.isfile(bgp2pathsfn):
+            res=common.load_pickle(bgp2routesfn)
+        else:
+            return # shortcut - we are not going to analyze anything, just stop
 
     # filter routes to be checked by path_check
     for r in res:
@@ -2059,7 +2057,7 @@ def module_process_day(day, ianadir, host, ipv6):
         common.save_pickle(res, bgp2pathsfn)
 
 
-def module_process(days, ianadir, host, ipv6, thrnum=MAX_PARSE_THREADS):
+def module_process(days, ianadir, host, ipv6, thrnum=1):
     """
     Module main interface.
 
