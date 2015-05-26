@@ -2001,8 +2001,12 @@ def module_preprocess(data_root_dir, thrnum=1):
         """
         
         def module_prepare_thread(tasks):
-            for t in tasks:
-                module_prepare_day(t[0], t[1])
+            try:
+                for t in tasks:
+                    module_prepare_day(t[0], t[1])
+            except Exception as e:
+                print str(e)
+                traceback.print_exc()
 
         tasks = [[] for i in range(0,thrnum)]
 
@@ -2094,12 +2098,12 @@ def module_process(days, ianadir, host, ipv6, thrnum=1):
     """
 
     def module_process_thread(tasks):
-        for t in tasks:
-            try:
+        try:
+            for t in tasks:
                 module_process_day(*t)
-            except Exception as e:
-                print str(e)
-                traceback.print_tb(*sys.exc_info())
+        except Exception as e:
+            print str(e)
+            traceback.print_exc()
 
 
     tasks=[[] for i in range(0,thrnum)]
