@@ -2095,7 +2095,11 @@ def module_process(days, ianadir, host, ipv6, thrnum=1):
 
     def module_process_thread(tasks):
         for t in tasks:
-            return module_process_day(*t)
+            try:
+                module_process_day(*t)
+            except Exception as e:
+                print str(e)
+                traceback.print_tb(*sys.exc_info())
 
 
     tasks=[[] for i in range(0,thrnum)]
