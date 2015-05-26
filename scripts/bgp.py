@@ -120,11 +120,11 @@ def format_buckets(buckets):
         tpfx+=pc
 
         if pc == 0:
-            yield "/"+str(i)+" : N/A (0 prefixes)"
+            yield "/%d : N/A (0 prefixes)"%i
         else:
-            yield "/"+str(i)+" : "+str(avg_pathlen(b))+" ("+str(pc)+" prefixes)"
+            yield "/%d : %.2f (%d prefixes)"%(i, round(avg_pathlen(b), 2), pc)
 
-    yield "Total prefixes examined: "+str(tpfx)
+    yield "Total prefixes examined: %d"%tpfx
 
 
 def gen_pathlen_textfile(buckets,outfile,ipv6):
@@ -141,7 +141,9 @@ def gen_pathlen_graph(buckets,outfile,ipv6):
     """ Generate graph from buckets of each day. Graph pathlengths (one point per day). """
     
     common.d('gen_pathlen_graph genering', outfile)
-    graph.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],outfile)
+    graph.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],
+                       outfile, xlabel='Prefix length', ylabel='Avg path len',
+                       title='\# of hops')
     
 
 def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
@@ -184,15 +186,15 @@ def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
 
     if avg:
         common.d("bgp.gen_pathlen_timegraph creating", filenamepfx+'avg')
-        graph.gen_lineplot(avg,filenamepfx+'avg')
+        graph.gen_lineplot(avg,filenamepfx+'avg', ylabel='Total avg path len', title='\# of hops')
 
     for i in range(0,rng+1):
         if pfxlen[i]:
             common.d("bgp.gen_pathlen_timegraph creating", filenamepfx+str(i))
-            graph.gen_lineplot(pfxlen[i],filenamepfx+str(i))
+            graph.gen_lineplot(pfxlen[i],filenamepfx+str(i), ylabel='Avg path len', title='\# of hops')
 
     if d3d:
-        graph.gen_3dplot(d3d,filenamepfx+'3d')
+        graph.gen_3dplot(d3d,filenamepfx+'3d', ylabel='Prefix length', zlabel='Avg path len', title='\# of hops')
 
 
 
@@ -228,12 +230,12 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
 
     if sumall:
         common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+'sum')
-        graph.gen_lineplot(sumall,filenamepfx+'sum')
+        graph.gen_lineplot(sumall,filenamepfx+'sum', ylabel='Prefix count', title='\# of pfxes')
 
     for i in range(0,rng+1):
         if counts[i]:
             common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+str(i))
-            graph.gen_lineplot(counts[i],filenamepfx+str(i))
+            graph.gen_lineplot(counts[i],filenamepfx+str(i), ylabel='/%d pfx count'%i, title='\# of pfxes')
 
 
 

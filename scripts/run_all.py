@@ -104,7 +104,7 @@ def postprocess_workpackage(days):
                         bgp.module_postprocess(host, days, ipv6)
 
                         # Run basic BGP stats with regards to IANA top-level assignments
-                        ianaspace.module_run(ianadir, host, days, ipv6, bestonly=True)
+                        ianaspace.module_process(ianadir, host, days, ipv6, bestonly=True)
 
                         # Generate advanced RPSL matching stats
                         rpsl.module_postprocess(days, ianadir, host, ipv6)
@@ -134,21 +134,25 @@ def main():
         """ run_all.py entrypoint. Everything starts here! """
 
         parser = argparse.ArgumentParser(description='Run BGPCRUNCH suite.')
-        parser.add_argument('--preprocess', dest='preproc', action='store_const',
-                            const=True, default=False, help='run only module preprocess routines')
-        parser.add_argument('--wp', dest='wpd', action='store', help='run only module main routines')
-        parser.add_argument('--postprocess', dest='postproc', action='store_const', const=True,
-                            default=False, help='run only module postprocess routines')
-        parser.add_argument('--listdays', dest='listdays', action='store_const', const=True,
-                            default=False, help='list only available days and end')
+        parser.add_argument('--preprocess', dest='preproc', action='store_true',
+                            help='run only module preprocess routines')
+        parser.add_argument('--wp', dest='wpd', action='store', help='file with workpackage specs')
+        parser.add_argument('--postprocess', dest='postproc', action='store_true',
+                            help='run only module postprocess routines')
+        parser.add_argument('--process', dest='proc', action='store_true',
+                            help='run only module process routines')
+        parser.add_argument('--listdays', dest='listdays', action='store_true',
+                            help='list only available days and end')
         args = parser.parse_args()
-        doall = (True if not args.preproc and not args.wpd and not args.postproc else False)
+        doall = (True if not args.preproc and not args.proc and not args.postproc else False)
 
         # Prepare run
         common.module_init(RESULT_DIR)
 
-        days = get_available_days()
+        # Decide days to run in workpackage
+        days = (read_days(args.wpd) if args.wpd else get_available_days())
 
+        # Run preprocess, process and postprocess
         if args.listdays:
                 for d in days:
                         print str(d)
@@ -156,14 +160,12 @@ def main():
 
         if doall or args.preproc:
                 preprocess_data()
+                if args.preproc:
+                        return
 
-        if doall or args.wpd:
-                if args.wpd:
-                        days=read_days(args.wpd)
-
+        if doall or args.proc:
                 process_workpackage(days)
-
-                if args.wpd:
+                if args.proc:
                         return
 
         if doall or args.postproc:

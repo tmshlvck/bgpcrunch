@@ -25,10 +25,11 @@ import graph
 import cisco
 import bgp
 
+# Constants
 
 RIRS=['LACNIC','APNIC','ARIN','RIPE NCC','AFRINIC']
 
-
+# Exported classes
 
 class IanaDirectory(object):
         def __init__(self,listfile,ipv6):
@@ -79,9 +80,15 @@ class IanaDirectory(object):
                 #return None
 
 
-
+# Module interface
 
 def module_process(ianadir, host, days, ipv6=False, bestonly=False):
+        """
+        Match BGP prefixes in IANA's directory and generate text
+        outputs and stats that determine average active prefix counts
+        and average de-aggregation for each RIR.
+        """
+
         timeline=[]
         timelineavg=[]
 
@@ -100,7 +107,7 @@ def module_process(ianadir, host, days, ipv6=False, bestonly=False):
                         net = ipaddr.IPNetwork(pv[1])
                         r=ianadir.resolve_network(net)
                         if not r:
-                                common.w("No IANA assignmen for", str(pv[1]))
+                                common.w("No IANA assignment for", str(pv[1]))
                                 continue
                         name=r[2]
                         if r[1] == 'LEGACY' and not name in RIRS:
@@ -109,25 +116,26 @@ def module_process(ianadir, host, days, ipv6=False, bestonly=False):
                                 rirpfxlens[name]=[]
                         rirpfxlens[name].append(net.prefixlen)
                 timeline.append([str(t)]+[len(rirpfxlens[n]) for n in RIRS])
-                timelineavg.append([str(t)]+[reduce(lambda x, y: x + y, rirpfxlens[n])/
-                                             float(len(rirpfxlens[n])) for n in RIRS])
+                timelineavg.append([str(t)]+[(reduce(lambda x, y: x + y, rirpfxlens[n])/
+                                             float(len(rirpfxlens[n]))) for n in RIRS])
 
                 outtxt = '%s/rirstats%d-%s.txt'%(common.resultdir(t), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR stats text "+outtxt)
                 with open(outtxt,'w') as f:
                         for i,k in enumerate(RIRS):
-                                f.write('%s: %d (avg pfxlen: %d)\n'%(str(k), timeline[-1][1+i], timelineavg[-1][1+i]))
+                                f.write('%s: %d (avg pfxlen: %.2f)\n'%(str(k), timeline[-1][1+i],
+                                                                       round(timelineavg[-1][1+i], 2)))
 
         if timeline:
                 outgraph = '%s/rirpfxcount%d-%s'%(common.resultdir(), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR pfxcount graph with prefix "+outgraph)
-                graph.gen_multilineplot(timeline,outgraph,legend=RIRS)
+                graph.gen_multilineplot(timeline, outgraph, legend=RIRS, ylabel='Pfx count')
 
         if timelineavg:
                 outgraph = '%s/rirpfxlen%d-%s'%(common.resultdir(), (6 if ipv6 else 4), host)
                 common.d("Generating output RIR pfxlen graph with prefix "+outgraph)
-                graph.gen_multilineplot(timelineavg,outgraph,legend=RIRS)
-        
+                graph.gen_multilineplot(timelineavg, outgraph, legend=RIRS, ylabel='Avg pfx len')
+
 
 
 # Module test interface

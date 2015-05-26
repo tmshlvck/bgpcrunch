@@ -60,7 +60,7 @@ set xlabel "'''+ xlabel +''''"
 set ylabel "''' + ylabel + '''"
 ''' + ('set xrange ['+str(xrange[0])+','+str(xrange[1])+']' if xrange else '')+'''
 '''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
-set xdata time
+'''+('set xdata time' if xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
 
 plot "-" using 1:2 with lines ls 1 title "''' + title + '''"
@@ -84,7 +84,7 @@ set xlabel "'''+ xlabel +''''"
 set ylabel "''' + ylabel + '''"
 ''' + ('set xrange ['+str(xrange[0])+','+str(xrange[1])+']' if xrange else '')+'''
 '''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
-set xdata time
+'''+('set xdata time' if xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
 
 plot'''
@@ -96,7 +96,7 @@ plot'''
         if i==0:
             continue
 
-        l = legend[i] if len(legend)>i else 'y'+str(i)
+        l = legend[i-1] if len(legend)>=i else 'y'+str(i)
         HEADER+=('"-"' if i==1 else '""')+' using 1:2 with lines title "' + l +'"'
         if i<len(data[0])-1:
             HEADER+=', '
@@ -130,7 +130,7 @@ set hidden3d
 set xlabel "''' + xlabel + '''"
 set ylabel "'''+ ylabel +''''"
 set zlabel "''' + zlabel + '''"
-set xdata time
+'''+('set xdata time' if xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
 
 splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"

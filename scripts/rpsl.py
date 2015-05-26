@@ -62,8 +62,10 @@ RIPE_BGP2ROUTES6_PICKLE='/bgp2routes6.pickle'
 
 RIPE_BGP2PATHS4_TXT='/bgp2paths.txt'
 RIPE_BGP2PATHS4_PICKLE='/bgp2paths.pickle'
+RIPE_BGP2PATHS4_GRAPH='bgp2paths'
 RIPE_BGP2PATHS6_TXT='/bgp2paths6.txt'
 RIPE_BGP2PATHS6_PICKLE='/bgp2paths6.pickle'
+RIPE_BGP2PATHS6_GRAPH='bgp2paths6'
 
 RIPE_ROUTE_VIOLATION_TIMELINE='/route_violations_timeline.txt'
 RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
@@ -1260,6 +1262,10 @@ def check_ripe_route(path_vector, iana_dir, ripe_routes):
         return (path_vector[1],path_vector[3],None,2)
 
     iananet=iana_dir.resolve_network(path_vector[1])
+    if not iananet:
+        common.w("IANA does not know path vector:", str(path_vector))
+        return (path_vector[1], path_vector[3], None, 5)
+
     if iananet[2] == 'RIPE NCC':
         routes=ripe_routes.getRouteObjs(path_vector[1])
         if routes:
@@ -1689,8 +1695,31 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
     total_export_notfound=0
     total_import_fltrfail=0
     total_export_fltrfail=0
-    
-    total_pfx=0
+    total_path_errors=0
+
+    errors_per_path=0
+    dunnos_per_path=0
+    avg_path_len=0
+
+    errors_on_position = [] # errors on position in as-path (index 0=nearest AS)
+    dunno_on_position = [] # no. of dunnos along as-path based on length (index 0=nearest AS)
+    hops_traversed = [] # no. of prefixes that traversed at least i ASes for each index i
+
+    def report_hop(hop, dunno, error, errors_on_position, dunno_on_position, hops_traversed):
+        while len(hops_traversed)<hop+1:
+            hops_traversed.append(0)
+        hops_traversed[hop]+=1
+
+        if error:
+            while len(errors_on_position)<hop+1:
+                errors_on_position.append(0)
+            errors_on_position[hop]+=1
+
+        if dunno:
+            while len(dunno_on_position)<hop+1:
+                dunno_on_position.append(0)
+            dunno_on_position[hop]+=1
+
 
     filename=common.resultdir(day)+(RIPE_BGP2PATHS6_TXT if ipv6 else RIPE_BGP2PATHS4_TXT)
     common.d("Generating file", filename)
@@ -1699,71 +1728,89 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
             of.write(str(path_vector)+(' (RIPE)' if allinripe else ' (world)')+':\n')
 
             total_pfx += 1
-            
+
             failures = 0
             dunno = False
-            for (autnum, s) in status:
+            for i,(autnum, s) in enumerate(status):
                 total_hops += 1
                 
                 ts=None
                 if s == 0:
                     total_hops_ok += 1
                     ts = 'OK'
+                    report_hop(i, False, False, errors_on_position, dunno_on_position, hops_traversed)
 
                 elif s == -1:
                     total_hops_dunno += 1
                     dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'Route obj failed, no-go check path'
 
                 elif s == 1:
                     total_hops_dunno += 1
                     dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'LOCAL/AGGR/no-check (=dunno)'
 
                 elif s == 2:
                     total_hops_dunno += 1
                     dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'NON-RIPE'
 
                 elif s == 300:
                     total_import_notfound += 1
                     failures += 1
+                    report_hop(i, False, True, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'import rule not found'
 
                 elif s > 300 and s < 320:
                     total_import_fltrfail += 1
                     failures += 1
+                    report_hop(i, False, True, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'import filter failed'
 
                 elif s >= 320 and s < 400:
                     total_hops_dunno += 1
                     dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'import filter DUNNO'
                     
                 elif s == 400:
                     total_export_notfound += 1
                     failures += 1
+                    report_hop(i, False, True, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'export fule not found'
 
                 elif s > 400 and s < 420:
                     total_export_fltrfail += 1
                     failures += 1
+                    report_hop(i, False, True, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'export filter failed'
 
                 elif s >= 420 and s < 500:
                     total_hops_dunno += 1
                     dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'export filter DUNNO'
 
                 else:
                     common.w('Unknown status in report_ripe_path_day: ', str(s))
+                    total_hops_dunno += 1
+                    dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = "UNKNOWN"
 
                 of.write('  * '+str(autnum)+' '+ts+'\n')
             of.write('  Failures: '+str(failures)+'\n\n')
 
+            total_path_errors += failures
+
             if dunno:
-                total_pfx_dunno += 1
+                if failures > 0:
+                    total_pfx_fail += 1
+                else:
+                    total_pfx_dunno += 1
             else:
                 if failures > 0:
                     total_pfx_fail += 1
@@ -1784,15 +1831,38 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
         of.write("%s: %d\n"%('Total export filter not-found', total_export_notfound))
         of.write("%s: %d\n"%('Total export filter invalid', total_export_fltrfail))
 
+        # Graph errors per path hops
+        errgraph = []
+        for i,traversed in enumerate(hops_traversed):
+            e = (errors_on_position[i] if len(errors_on_position)>i else 0)
+            d = (dunno_on_position[i] if len(dunno_on_position)>i else 0)
+            errgraph.append((i,traversed,e,d))
+    
+        filepfx=common.resultdir(day)+(RIPE_BGP2PATHS6_GRAPH if ipv6 else RIPE_BGP2PATHS4_GRAPH)
+        common.d("Generating graph with pfx", filepfx)
+        graph.gen_multilineplot(errgraph, filepfx, xlabel="Path hops",
+                                legend=['\# of pfx', '\# of errors', '\# of dunnos'])
 
-    # TODO create another file with more thorough statistic of failures
-    # failure count - pathlen -> prefixes total, prefixes with one failure, two, ..., pathlen
-    # failure matrix - pathlen -> prefixes total, failed in first, ..., failed in pathlen
+        of.write('\n-------------------------------------------\n')
+        for err in errgraph:
+            of.write('Hop %d : %d pfx traversed, %d ok, %d errors, %d dunnos\n'%(err[0],
+                                                                                 err[1], err[1]-err[2]-err[3],
+                                                                                 err[2], err[3]))
 
-    return ((total_pfx_ok, total_pfx_dunno, total_pfx_fail),
-            (total_hops_ok, total_hops_dunno,
+        errors_per_path = total_path_errors/float(total_pfx)
+        dunnos_per_path = total_hops_dunno/float(total_pfx)
+        avg_path_len = total_hops/float(total_pfx)
+            
+        of.write('\n-------------------------------------------\n')
+        of.write('Avg path length: %.2f\n'%avg_path_len)
+        of.write('Avg dunnos per path: %.2f\n'%dunnos_per_path)
+        of.write('Avg errors per path: %.2f\n'%errors_per_path)
+    
+    return ((day, total_pfx_ok, total_pfx_dunno, total_pfx_fail),
+            (day, total_hops_ok, total_hops_dunno,
              total_import_notfound, total_export_notfound,
-             total_import_fltrfail, total_export_fltrfail))
+             total_import_fltrfail, total_export_fltrfail),
+            (day, errors_per_path, dunnos_per_path, avg_path_len))
 
 
 
@@ -1976,7 +2046,6 @@ def module_process_day(day, ianadir, host, ipv6):
             pfx_path_check_worthy[r[0]] = True
 
 
-
     # free bgp2routes
     del res
     gc.collect()
@@ -1988,15 +2057,6 @@ def module_process_day(day, ianadir, host, ipv6):
         common.d("Checking paths. Creating file", bgp2pathsfn)
         res=list(check_ripe_paths(day, ianadir, host, ipv6, True, MY_ASN, pfx_path_check_worthy))
         common.save_pickle(res, bgp2pathsfn)
-    else:
-        res=common.load_pickle(bgp2pathsfn)
-
-    path_res=report_ripe_paths_day(res, day, common.resultdir(day), ipv6)
-    lock.acquire(True)
-    path_totals.append(path_res[0])
-    path_totals_detail.append(path_res[1])
-    lock.release()
-
 
 
 def module_process(days, ianadir, host, ipv6):
@@ -2010,7 +2070,7 @@ def module_process(days, ianadir, host, ipv6):
     call of module_process.
 
     The module_process does two basic things:
-    First it visits each day in  the ripe_days (run in multiple threads
+    First it visits each day in the days (run in multiple threads
     in paralel) and do:
     a) check all BGP path_vectors' origin in route-object lookup list
     constructed out of route or route6 objects in RIPE DB
@@ -2055,7 +2115,7 @@ def module_process(days, ianadir, host, ipv6):
             t.join()
 
     
-def module_postprocess(ripe_days, ianadir, host, ipv6):
+def module_postprocess(days, ianadir, host, ipv6):
     """
     Module main interface. Run postprocess (generate graphs and text outputs).
 
@@ -2069,57 +2129,72 @@ def module_postprocess(ripe_days, ianadir, host, ipv6):
     route_violators={}
     path_totals=[]
     path_totals_detail=[]
+    path_stats=[]
 
-    # Load check route results
-    bgp2routesfn=common.resultdir(day)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
-    if os.path.isfile(bgp2routesfn):
-        res=common.load_pickle(bgp2routesfn)
-    else:
-        raise Exception('Can not load '+bgp2routesfn)
+    for day in days:   
+        # Load check route results
+        bgp2routesfn=common.resultdir(day)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
+        if os.path.isfile(bgp2routesfn):
+            res=common.load_pickle(bgp2routesfn)
+        else:
+            raise Exception('Can not load '+bgp2routesfn)
 
-    # Generate report for routes
-    route_totals.append(report_ripe_routes_day(res, day, common.resultdir(day), ipv6))
+        # Generate report for routes
+        route_totals.append(report_ripe_routes_day(res, day, common.resultdir(day), ipv6))
 
-    # Filter route violators
-    for r in res:
-        if r[3]==3 or r[3]==4: # not match or not found
-            route_violators[r[0]] = True
+        # Filter route violators
+        for r in res:
+            if r[3]==3 or r[3]==4: # not match or not found
+                route_violators[r[0]] = True
 
-    # free bgp2routes
-    del res
-    gc.collect()
-    res=None
+        # free bgp2routes
+        del res
+        gc.collect()
+        res=None
 
-    # Load check paths results
-    bgp2pathsfn=common.resultdir(day)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
-    if os.path.isfile(bgp2pathsfn):
-        res=common.load_pickle(bgp2pathsfn)
-    else:
-        raise Exception('Can not load '+bgp2pathsfn)
+        # Load check paths results
+        bgp2pathsfn=common.resultdir(day)+(RIPE_BGP2PATHS6_PICKLE if ipv6 else RIPE_BGP2PATHS4_PICKLE)
+        if os.path.isfile(bgp2pathsfn):
+            res=common.load_pickle(bgp2pathsfn)
+        else:
+            raise Exception('Can not load '+bgp2pathsfn)
 
-    path_res=report_ripe_paths_day(res, day, common.resultdir(day), ipv6)
-    path_totals.append(path_res[0])
-    path_totals_detail.append(path_res[1])
+        path_res=report_ripe_paths_day(res, day, common.resultdir(day), ipv6)
+        path_totals.append(path_res[0])
+        path_totals_detail.append(path_res[1])
+        path_stats.append(path_res[2])
     
     # Graph route totals
     if route_totals:
         common.d("Generating graph with pfx", common.resultdir()+'/bgp2routes'+('6' if ipv6 else '4'))
-        graph.gen_multilineplot(route_totals, common.resultdir()+'/bgp2routes'+('6' if ipv6 else '4'), legend=RIPE_ROUTES_MATCH_LEGEND)
+        graph.gen_multilineplot(route_totals, common.resultdir()+'/bgp2routes'+('6' if ipv6 else '4'),
+                                legend=RIPE_ROUTES_MATCH_LEGEND, ylabel="\# of pfxes")
 
     # Revisit common.resultdir(d)+RIPE_BGP2ROUTES_PICKLE for each day and cross check time to fix
     if route_violators:
         common.d("Crating route timeline...")
-        tl=ripe_gen_route_timeline(route_violators.keys(), ripe_days, ipv6)
+        tl=ripe_gen_route_timeline(route_violators.keys(), days, ipv6)
         report_route_timeline(tl, ipv6)
 
     # Graph path totals
     if path_totals:
         common.d("Generating graph with pfx", common.resultdir()+'/bgp2paths'+('6' if ipv6 else '4'))
-        graph.gen_multilineplot(path_totals, common.resultdir()+'/bgp2paths'+('6' if ipv6 else '4'), legend=RIPE_PATHS_MATCH_LEGEND)
+        graph.gen_multilineplot(path_totals, common.resultdir()+'/bgp2paths'+('6' if ipv6 else '4'),
+                                legend=RIPE_PATHS_MATCH_LEGEND, ylabel="\# of pfxes")
 
     if path_totals_detail:
         common.d("Generating graph with pfx", common.resultdir()+'/bgp2paths-detail'+('6' if ipv6 else '4'))
-        graph.gen_multilineplot(path_totals, common.resultdir()+'/bgp2paths-detail'+('6' if ipv6 else '4'), legend=RIPE_PATHS_MATCH_DET_LEGEND)
+        graph.gen_multilineplot(path_totals_detail,
+                                common.resultdir()+'/bgp2paths-detail'+('6' if ipv6 else '4'),
+                                legend=RIPE_PATHS_MATCH_DET_LEGEND, ylabel="\# of pfxes")
+
+
+    if path_stats:
+        common.d("Generating graph with pfx", common.resultdir()+'/bgp2paths-stats'+('6' if ipv6 else '4'))
+        graph.gen_multilineplot(path_stats,
+                                common.resultdir()+'/bgp2paths-stats'+('6' if ipv6 else '4'),
+                                legend=['Errors per path', 'Dunno per path', 'Avg path len'],
+                                ylabel="\# of occurences")
 
 
 
