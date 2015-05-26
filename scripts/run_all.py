@@ -120,7 +120,7 @@ def read_days(filename):
         objects.
         """
 
-        DAY_MATCH=re.compile("^([0-9])+-([0-9])+-([0-9]+)$")
+        DAY_MATCH=re.compile("^([0-9]+)-([0-9]+)-([0-9]+)$")
 
         with open(filename, 'r') as f:
                 for l in f.readlines():
