@@ -1991,10 +1991,10 @@ def module_listdays(data_root_dir):
         yield (d,fn)
 
 
-def module_preprocess(data_root_dir):
+def module_preprocess(data_root_dir, thrnum=MAX_PREP_THREADS):
         """
         Prepare datastructures for RPSL module.
-        Run in multiple threads if MAX_PREP_THREADS allows it.
+        Run in multiple threads if thrnum/MAX_PREP_THREADS allows it.
         Beware: The parser generates huge files in temp dir (~3G per parser)
         and consumes huge ammount of memory (at least 1G per parser). Therefore
         concurrent execution could run out of resources.
@@ -2007,16 +2007,16 @@ def module_preprocess(data_root_dir):
             for t in tasks:
                 module_prepare_day(t[0], t[1])
 
-        tasks = [[] for i in range(0,MAX_PREP_THREADS)]
+        tasks = [[] for i in range(0,thrnum)]
 
         for i,(d,fn) in enumerate(module_listdays(data_root_dir)):
             d = common.Day(decode_ripe_tgz_filename(fn)[0:3])
 
-            tasks[i%MAX_PREP_THREADS].append((fn,d))
+            tasks[i%thrnum].append((fn,d))
 
-        if MAX_PREP_THREADS > 1:
+        if thrnum > 1:
             threads=[]
-            for i in range(0,MAX_PREP_THREADS):
+            for i in range(0,thrnum):
                 t=threading.Thread(target=module_prepare_thread, args=[tasks[i]])
                 t.start()
                 threads.append(t)
@@ -2059,7 +2059,7 @@ def module_process_day(day, ianadir, host, ipv6):
         common.save_pickle(res, bgp2pathsfn)
 
 
-def module_process(days, ianadir, host, ipv6):
+def module_process(days, ianadir, host, ipv6, thrnum=MAX_PARSE_THREADS):
     """
     Module main interface.
 
@@ -2090,12 +2090,12 @@ def module_process(days, ianadir, host, ipv6):
             return module_process_day(*t)
 
 
-    tasks=[[] for i in range(0,MAX_PARSE_THREADS)]
+    tasks=[[] for i in range(0,thrnum)]
     thrindex=0
     for d in days:
         common.d('Working on data for day:', str(d))
-        if MAX_PARSE_THREADS > 1:
-            tasks[thrindex%MAX_PARSE_THREADS].append((d, ianadir, host, ipv6))
+        if thrnum > 1:
+            tasks[thrindex%thrnum].append((d, ianadir, host, ipv6))
             thrindex+=1
         else:
             # run single-threaded worker
@@ -2104,9 +2104,9 @@ def module_process(days, ianadir, host, ipv6):
         common.w('Missing BGP data for day %s and host %s'%(str(d),host))
 
     # run worker threads
-    if MAX_PARSE_THREADS > 1:
+    if thrnum > 1:
         threads=[]
-        for i in range(0,MAX_PREP_THREADS):
+        for i in range(0,thrnum):
             t=threading.Thread(target=module_process_thread, args=[tasks[i]])
             t.start()
             threads.append(t)

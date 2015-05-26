@@ -54,7 +54,7 @@ def get_available_days():
         days = common.intersect(days, ripe)
         return sorted(days)
 
-def preprocess_data():
+def preprocess_data(threads=1):
         """
         Preprocess data. Meaning: Read textual data and create proper Python datastructures
         and save them in form of pickles. This should not be much time consuming and it has
@@ -62,7 +62,7 @@ def preprocess_data():
         """
         
         # Prepare RPSL parsing products
-        rpsl.module_preprocess(DATA_DIR)
+        rpsl.module_preprocess(DATA_DIR, threads)
 
         for ipv6 in [False,True]:
                 # Create BGP data in result directories (= ROOT/results/2014-04-01/bgp4-marge.pickle).
@@ -71,7 +71,7 @@ def preprocess_data():
 
 
 
-def process_workpackage(days):
+def process_workpackage(days, threads=1):
         """
         This function contains the most time consuming work that has to be done for
         each day but it does not aggregate days. Meaning: Days can be processed concurently.
@@ -87,7 +87,7 @@ def process_workpackage(days):
 
                 for host in BGP_HOSTS:
                         # Run RPSL matching (routes and paths)
-                        rpsl.module_process(days, ianadir, host, ipv6)
+                        rpsl.module_process(days, ianadir, host, ipv6, threads)
 
 
 
@@ -143,6 +143,7 @@ def main():
                             help='run only module process routines')
         parser.add_argument('--listdays', dest='listdays', action='store_true',
                             help='list only available days and end')
+        parser.add_argument('--threads', dest='thr', type=int, action='store', help='run THR threads', default=1)
         args = parser.parse_args()
         doall = (True if not args.preproc and not args.proc and not args.postproc else False)
 
@@ -159,12 +160,12 @@ def main():
                 return
 
         if doall or args.preproc:
-                preprocess_data()
+                preprocess_data(args.thr)
                 if args.preproc:
                         return
 
         if doall or args.proc:
-                process_workpackage(days)
+                process_workpackage(days, args.thr)
                 if args.proc:
                         return
 
