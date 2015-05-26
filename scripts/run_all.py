@@ -75,7 +75,7 @@ def process_workpackage(days, threads=1):
         """
         This function contains the most time consuming work that has to be done for
         each day but it does not aggregate days. Meaning: Days can be processed concurently.
-        One level of concurency is achieved inside modules using threading (tuned for each
+        One level of concurency is achieved inside modules using multiprocessing (tuned for each
         module. Another is achieved by splitting workpackages and distributing them over
         different servers.
         """

@@ -22,7 +22,7 @@ import sys
 import os
 import ipaddr
 import traceback
-import threading
+import multiprocessing
 import gc
 
 import common
@@ -2017,7 +2017,7 @@ def module_preprocess(data_root_dir, thrnum=MAX_PREP_THREADS):
         if thrnum > 1:
             threads=[]
             for i in range(0,thrnum):
-                t=threading.Thread(target=module_prepare_thread, args=[tasks[i]])
+                t=multiprocessing.Process(target=module_prepare_thread, args=[tasks[i]])
                 t.start()
                 threads.append(t)
 
@@ -2093,12 +2093,13 @@ def module_process(days, ianadir, host, ipv6, thrnum=MAX_PARSE_THREADS):
     tasks=[[] for i in range(0,thrnum)]
     thrindex=0
     for d in days:
-        common.d('Working on data for day:', str(d))
         if thrnum > 1:
+            common.d('Considering data for day:', str(d), 'thread index:', str(thrindex%thrnum))
             tasks[thrindex%thrnum].append((d, ianadir, host, ipv6))
             thrindex+=1
         else:
             # run single-threaded worker
+            common.d('Considering data for day:', str(d), 'single-threaded.')
             module_process_day(d, ianadir, host, ipv6)
     else:
         common.w('Missing BGP data for day %s and host %s'%(str(d),host))
@@ -2107,7 +2108,7 @@ def module_process(days, ianadir, host, ipv6, thrnum=MAX_PARSE_THREADS):
     if thrnum > 1:
         threads=[]
         for i in range(0,thrnum):
-            t=threading.Thread(target=module_process_thread, args=[tasks[i]])
+            t=multiprocessing.Process(target=module_process_thread, args=[tasks[i]])
             t.start()
             threads.append(t)
 
