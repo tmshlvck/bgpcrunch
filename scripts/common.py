@@ -243,8 +243,9 @@ class Day(object):
     def __repr__(self):
         return self.__str__()
 
-    def __eq__(self,other):
-        return (self.time == other.time)
+    def __cmp__(self,other):
+        assert isinstance(other, Day)
+        return cmp(self.time, other.time)
 
 
 class _IPLookupTreeNode(object):
