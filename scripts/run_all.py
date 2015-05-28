@@ -49,7 +49,7 @@ def get_available_days():
         bgp4 = [d for d,fn in bgp.module_listdays(BGP_HOSTS, BGP_DATA, False)]
         bgp6 = [d for d,fn in bgp.module_listdays(BGP_HOSTS, BGP_DATA, True)]
         ripe = [d for d,fn in rpsl.module_listdays(DATA_DIR)]
-        
+
         days = common.intersect(bgp4, bgp6)
         days = common.intersect(days, ripe)
         return sorted(days)
@@ -113,6 +113,13 @@ def postprocess_workpackage(days):
 
 
 # Command line helper functions
+DAY_MATCH=re.compile("^([0-9]+)-([0-9]+)-([0-9]+)$")
+
+def decode_day(text):
+        m=DAY_MATCH.match(text)
+        if m:
+                return common.Day((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+
 def read_days(filename):
         """ Helper for command line.
         This function reads a file that contains string representation
@@ -120,13 +127,11 @@ def read_days(filename):
         objects.
         """
 
-        DAY_MATCH=re.compile("^([0-9]+)-([0-9]+)-([0-9]+)$")
-
         with open(filename, 'r') as f:
                 for l in f.readlines():
-                        m=DAY_MATCH.match(l)
-                        if m:
-                                yield common.Day((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+                        d=decode_day(text)
+                        if d:
+                                yield d
 
 
 
@@ -137,6 +142,7 @@ def main():
         parser.add_argument('--preprocess', dest='preproc', action='store_true',
                             help='run only module preprocess routines')
         parser.add_argument('--wp', dest='wpd', action='store', help='file with workpackage specs')
+        parser.add_argument('--days', dest='day', action='store', nargs="*", help='command line workpackage specs')
         parser.add_argument('--postprocess', dest='postproc', action='store_true',
                             help='run only module postprocess routines')
         parser.add_argument('--process', dest='proc', action='store_true',
@@ -151,7 +157,13 @@ def main():
         common.module_init(RESULT_DIR)
 
         # Decide days to run in workpackage
-        days = (read_days(args.wpd) if args.wpd else get_available_days())
+        days = None
+        if args.wpd:
+                days=read_days(args.wpd)
+        elif args.day:
+                days=[decode_day(d) for d in args.day]
+        else:
+                days=get_available_days()
 
         # Run preprocess, process and postprocess
         if args.listdays:
