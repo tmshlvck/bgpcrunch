@@ -129,7 +129,7 @@ def read_days(filename):
 
         with open(filename, 'r') as f:
                 for l in f.readlines():
-                        d=decode_day(text)
+                        d=decode_day(l)
                         if d:
                                 yield d
 
