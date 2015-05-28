@@ -1688,6 +1688,7 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
     total_hops=0
     total_hops_ok=0
     total_hops_dunno=0
+    total_hops_syntax_dunno=0
     total_import_notfound=0
     total_export_notfound=0
     total_import_fltrfail=0
@@ -1767,7 +1768,14 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                     report_hop(i, False, True, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'import filter failed'
 
-                elif s >= 320 and s < 400:
+                elif s == 320:
+                    total_hops_syntax_dunno += 1
+                    total_hops_dunno += 1
+                    dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
+                    ts = 'import filter syntax error -> DUNNO'
+                    
+                elif s > 320 and s < 400:
                     total_hops_dunno += 1
                     dunno = True
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
@@ -1785,7 +1793,14 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                     report_hop(i, False, True, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'export filter failed'
 
-                elif s >= 420 and s < 500:
+                elif s == 420:
+                    total_hops_syntax_dunno += 1
+                    total_hops_dunno += 1
+                    dunno = True
+                    report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
+                    ts = 'export filter syntax error -> DUNNO'
+
+                elif s > 420 and s < 500:
                     total_hops_dunno += 1
                     dunno = True
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
@@ -1823,6 +1838,7 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
         of.write("%s: %d\n"%('Total hops observed', total_hops))
         of.write("%s: %d\n"%('Total hops valid', total_hops_ok))
         of.write("%s: %d\n"%('Total hops unknown (non-RIPE/aggregate/filter-dunno)', total_hops_dunno))
+        of.write("%s: %d\n"%('Total hops unknown due to filter syntax error (included in dunno)', total_hops_syntax_dunno))
         of.write("%s: %d\n"%('Total import filter not-found', total_import_notfound))
         of.write("%s: %d\n"%('Total import filter invalid', total_import_fltrfail))
         of.write("%s: %d\n"%('Total export filter not-found', total_export_notfound))
