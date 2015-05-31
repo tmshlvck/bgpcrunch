@@ -52,7 +52,7 @@ def get_available_days():
 
         days = common.intersect(bgp4, bgp6)
         days = common.intersect(days, ripe)
-        return sorted(days)
+        return sorted(list(days))
 
 def preprocess_data(threads=1):
         """
@@ -159,7 +159,7 @@ def main():
         # Decide days to run in workpackage
         days = None
         if args.wpd:
-                days=read_days(args.wpd)
+                days=list(read_days(args.wpd))
         elif args.day:
                 days=[decode_day(d) for d in args.day]
         else:
