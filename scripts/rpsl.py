@@ -59,10 +59,10 @@ RIPE_BGP2ROUTES6_PICKLE='/bgp2routes6.pickle'
 
 RIPE_BGP2PATHS4_TXT='/bgp2paths.txt'
 RIPE_BGP2PATHS4_PICKLE='/bgp2paths.pickle'
-RIPE_BGP2PATHS4_GRAPH='bgp2paths'
+RIPE_BGP2PATHS4_GRAPH='/bgp2paths'
 RIPE_BGP2PATHS6_TXT='/bgp2paths6.txt'
 RIPE_BGP2PATHS6_PICKLE='/bgp2paths6.pickle'
-RIPE_BGP2PATHS6_GRAPH='bgp2paths6'
+RIPE_BGP2PATHS6_GRAPH='/bgp2paths6'
 
 RIPE_ROUTE_VIOLATION_TIMELINE='/route_violations_timeline.txt'
 RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
@@ -1395,7 +1395,12 @@ def ripe_gen_route_timeline(violators, days, ipv6=False):
 
         for rv in dayres:
             if rv[0] in timeline:
-                if len(timeline[rv[0]])==0 or timeline[rv[0]][-1] != rv[1:]:
+                if len(timeline[rv[0]])==0 or tuple(timeline[rv[0]][-1][1:]) != tuple(rv):
+                    # * take the timeline row identified by the prefix timeline[rv[0]]
+                    # * take the last result vector in the timeline
+                    # * remove the date (first column)
+                    # * compare to the actual resultvector and if it differs, there was a change, add it
+                    # to the timeline
                     timeline[rv[0]].append(tuple([d]+list(rv)))
 
     return timeline
