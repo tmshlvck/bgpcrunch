@@ -1419,8 +1419,8 @@ def report_route_timeline(timeline, ipv6=False):
                 if r[4] == 3: # not match
                     tf.write('%s %s (%s) %s: ripe-db orig: %s\n'%(str(r[0]),
                         str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]], str([ro.origin for ro in r[3]])))
-                elif r[4] == 4: # not found
-                    tf.write('%s %s (%s) %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]]))
+                elif r[4] >= 0 and r[4] < len(RIPE_ROUTES_MATCH_LEGEND): # any other
+                    tf.write('%s %s (%s) %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]]))                   
                 else:
                     raise Exception("Unexpected status: "+str(r[4]))
 
