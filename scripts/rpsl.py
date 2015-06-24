@@ -67,6 +67,9 @@ RIPE_BGP2PATHS6_GRAPH='/bgp2paths6'
 RIPE_ROUTE_VIOLATION_TIMELINE='/route_violations_timeline.txt'
 RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
 
+RIPE_ROUTE_VIOLATION_TIMELINE_DIR='/route_violations_timeline/'
+RIPE_ROUTE6_VIOLATION_TIMELINE_DIR='/route6_violations_timeline/'
+
 
 # Data model
 
@@ -1427,6 +1430,63 @@ def report_route_timeline(timeline, ipv6=False):
             tf.write('\n--------------------------------------------------\n\n')
 
 
+
+def ripe_gen_route_timeline_files(violators, days, ipv6=False):
+    """ Generate timeline for each suspect route into it's own file. """
+
+    def gen_filename(ipaddr):
+        return str(ipaddr).replace('/','-')
+
+    def append_timeline_record(r, ipv6):
+        """
+        r is the record tuple
+        r = (day, prefix, as-path, routeObj or None, status)
+        use RIPE_ROUTES_MATCH_LEGEND for status
+        """
+
+        txtout=common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE_DIR if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE_DIR)+gen_filename(rv[0])
+        # common.d('Writing timeline to:', txtout)
+        with open(txtout, 'a') as tf:
+            if r[4] == 3: # not match
+                tf.write('%s %s (%s) %s: ripe-db orig: %s\n'%(str(r[0]),
+                    str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]], str([ro.origin for ro in r[3]])))
+            elif r[4] >= 0 and r[4] < len(RIPE_ROUTES_MATCH_LEGEND): # any other
+                tf.write('%s %s (%s) %s\n'%(str(r[0]), str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]]))
+            else:
+                raise Exception("Unexpected status: "+str(r[4]))
+
+
+    # Create directory
+    d = os.path.dirname(common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE_DIR if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE_DIR))
+    try:
+        os.stat(d)
+    except:
+        os.mkdir(d)
+
+    # Read text files
+    last = {}
+    for v in violators:
+        last[v] = None
+    for d in sorted(days):
+        common.d("ripe_gen_route_timeline: Working on day %s"%str(d))
+        bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
+        dayres=common.load_pickle(bgp2routesfn)
+        # dayres contains list of tuples (prefix, as-path, routeObj or None, status)
+
+        for rv in dayres:
+            if rv[0] in last:
+                if last[rv[0]] != rv:
+                    # * take the current state
+                    # * take the last result vector in the timeline
+                    # * compare to the actual resultvector and if it differs, there was a change, add it
+                    # to the timeline
+                    append_timeline_record(tuple([d]+list(rv)), ipv6)
+                    last[rv[0]] = rv
+
+
+
+
+
 # Path checking code
 
 def normalize_aspath(text):
@@ -2209,8 +2269,9 @@ def module_postprocess(days, ianadir, host, ipv6):
     # Revisit common.resultdir(d)+RIPE_BGP2ROUTES_PICKLE for each day and cross check time to fix
     if route_violators:
         common.d("Crating route timeline...")
-        tl=ripe_gen_route_timeline(route_violators.keys(), days, ipv6)
-        report_route_timeline(tl, ipv6)
+#        tl=ripe_gen_route_timeline(route_violators.keys(), days, ipv6)
+#        report_route_timeline(tl, ipv6)
+        ripe_gen_route_timeline_files(route_violators.keys(), days, ipv6)
 
     # Graph path totals
     if path_totals:
