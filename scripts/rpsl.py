@@ -1475,7 +1475,7 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
 
         for rv in dayres:
             if rv[0] in last:
-                if tuple(last[rv[0]]) != tuple(rv):
+                if last[rv[0]] is None or tuple(last[rv[0]]) != tuple(rv):
                     # * take the current state
                     # * take the last result vector in the timeline
                     # * compare to the actual resultvector and if it differs, there was a change, add it
