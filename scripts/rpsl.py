@@ -70,6 +70,9 @@ RIPE_ROUTE6_VIOLATION_TIMELINE='/route6_violations_timeline.txt'
 RIPE_ROUTE_VIOLATION_TIMELINE_DIR='/route_violations_timeline/'
 RIPE_ROUTE6_VIOLATION_TIMELINE_DIR='/route6_violations_timeline/'
 
+RIPE_BGP2PATHS_PFXLEN4_GRAPH='/bgppathbypfxlen4'
+RIPE_BGP2PATHS_PFXLEN6_GRAPH='/bgppathbypfxlen6'
+
 
 # Data model
 
@@ -1769,6 +1772,8 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
     dunno_on_position = [] # no. of dunnos along as-path based on length (index 0=nearest AS)
     hops_traversed = [] # no. of prefixes that traversed at least i ASes for each index i
 
+    pfxlen_stat = [[0,0,0]] * (129 if ipv6 else 33) # number of (pfxes, errors, dunnos) by pfxlen
+
     def report_hop(hop, dunno, error, errors_on_position, dunno_on_position, hops_traversed):
         while len(hops_traversed)<hop+1:
             hops_traversed.append(0)
@@ -1794,6 +1799,7 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
             total_pfx += 1
 
             failures = 0
+            valid = 0
             dunno = False
             for i,(autnum, s) in enumerate(status):
                 total_hops += 1
@@ -1802,6 +1808,7 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                 if s == 0:
                     total_hops_ok += 1
                     ts = 'OK'
+                    valid += 1
                     report_hop(i, False, False, errors_on_position, dunno_on_position, hops_traversed)
 
                 elif s == -1:
@@ -1884,15 +1891,20 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
 
             total_path_errors += failures
 
+            pfxlen=ipaddr.IPNetwork(path_vector[1]).prefixlen
             if dunno:
                 if failures > 0:
+                    pfxlen_stat[pfxlen][1] += failures
                     total_pfx_fail += 1
                 else:
+                    pfxlen_stat[pfxlen][2] += failures
                     total_pfx_dunno += 1
             else:
                 if failures > 0:
+                    pfxlen_stat[pfxlen][1] += failures
                     total_pfx_fail += 1
                 else:
+                    pfxlen_stat[pfxlen][0] += valid
                     total_pfx_ok += 1
 
         of.write('\n-------------------------------------------\n')
@@ -1928,6 +1940,14 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                                                                                  err[1], err[1]-err[2]-err[3],
                                                                                  err[2], err[3]))
 
+        # Graph path # of errors in paths based on pfxlen
+        filepfx=common.resultdir(day)+(RIPE_BGP2PATHS_PFXLEN6_GRAPH if ipv6 else RIPE_BGP2PATHS_PFXLEN4_GRAPH)
+        common.d("Generating graph with pfx", filepfx)
+        graph.gen_multilineplot(pfxlen_stat, filepfx, xlabel="pfx len", ylabel="Count",
+                                legend=['\# valid hops', '\# of errors', '\# of dunnos'])
+
+
+        # Totals
         errors_per_path = total_path_errors/float(total_pfx)
         dunnos_per_path = total_hops_dunno/float(total_pfx)
         avg_path_len = total_hops/float(total_pfx)
