@@ -1384,7 +1384,7 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
 
 
 
-
+########## UNUSED - Not memory-effective ##########
 def ripe_gen_route_timeline(violators, days, ipv6=False):
     """ Generate timeline for each suspect route. """
 
@@ -1431,7 +1431,7 @@ def report_route_timeline(timeline, ipv6=False):
                     raise Exception("Unexpected status: "+str(r[4]))
 
             tf.write('\n--------------------------------------------------\n\n')
-
+########## END OF UNUSED - Not memory-effective ##########
 
 
 def ripe_gen_route_timeline_files(violators, days, ipv6=False):
@@ -1450,7 +1450,9 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
         txtout=common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE_DIR if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE_DIR)+gen_filename(rv[0])
         # common.d('Writing timeline to:', txtout)
         with open(txtout, 'a') as tf:
-            if r[4] == 3: # not match
+            if r[2] is None:
+                tf.write('%s %s not in BGP table\n'%(str(r[0]), str(r[1])))
+            elif r[4] == 3: # not match
                 tf.write('%s %s (%s) %s: ripe-db orig: %s\n'%(str(r[0]),
                     str(r[1]), str(r[2]), RIPE_ROUTES_MATCH_LEGEND[r[4]], str([ro.origin for ro in r[3]])))
             elif r[4] >= 0 and r[4] < len(RIPE_ROUTES_MATCH_LEGEND): # any other
@@ -1460,17 +1462,18 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
 
 
     # Create directory
-    d = os.path.dirname(common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE_DIR if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE_DIR))
+    odir = os.path.dirname(common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE_DIR if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE_DIR))
     try:
-        os.stat(d)
+        os.stat(odir)
     except:
-        os.mkdir(d)
+        os.mkdir(odir)
 
     # Read text files
-    last = {}
-    for v in violators:
-        last[v] = None
+    last = {v:None for v in violators}
+
     for d in sorted(days):
+        matched={v:False for v in violators}
+        
         common.d("ripe_gen_route_timeline: Working on day %s"%str(d))
         bgp2routesfn=common.resultdir(d)+(RIPE_BGP2ROUTES6_PICKLE if ipv6 else RIPE_BGP2ROUTES4_PICKLE)
         dayres=common.load_pickle(bgp2routesfn)
@@ -1478,6 +1481,7 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
 
         for rv in dayres:
             if rv[0] in last:
+                matched[rv[0]] = True
                 if last[rv[0]] is None or tuple(last[rv[0]]) != tuple(rv):
                     # * take the current state
                     # * take the last result vector in the timeline
@@ -1487,6 +1491,14 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
                     #common.d("Setting last for", rv[0], "to", rv)
                     last[rv[0]] = tuple(rv)
 
+        # Find violators that are not in BGP table this day
+        for v in matched.keys():
+            if not matched[v]:
+                if not last[v] is None:
+                    # record format (day, prefix, as-path, routeObj or None, status) -> as-path=None
+                    # means pfx not in daily table
+                    append_timeline_record(tuple([d,v,None,None,0]), ipv6)
+                    last[v] = None
 
 
 
