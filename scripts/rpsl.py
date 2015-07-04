@@ -1784,7 +1784,9 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
     dunno_on_position = [] # no. of dunnos along as-path based on length (index 0=nearest AS)
     hops_traversed = [] # no. of prefixes that traversed at least i ASes for each index i
 
-    pfxlen_stat = [[0,0,0]] * (129 if ipv6 else 33) # number of (pfxes, errors, dunnos) by pfxlen
+    pfxlen_stat = []  # number of (pfxlen, pfxes, errors, dunnos) by pfxlen
+    for i in range(0,(129 if ipv6 else 33)):
+        pfxlen_stat.append([i,0,0,0])
 
     def report_hop(hop, dunno, error, errors_on_position, dunno_on_position, hops_traversed):
         while len(hops_traversed)<hop+1:
@@ -1906,17 +1908,17 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
             pfxlen=ipaddr.IPNetwork(path_vector[1]).prefixlen
             if dunno:
                 if failures > 0:
-                    pfxlen_stat[pfxlen][1] += failures
+                    pfxlen_stat[pfxlen][2] += failures
                     total_pfx_fail += 1
                 else:
-                    pfxlen_stat[pfxlen][2] += failures
+                    pfxlen_stat[pfxlen][3] += failures
                     total_pfx_dunno += 1
             else:
                 if failures > 0:
-                    pfxlen_stat[pfxlen][1] += failures
+                    pfxlen_stat[pfxlen][2] += failures
                     total_pfx_fail += 1
                 else:
-                    pfxlen_stat[pfxlen][0] += valid
+                    pfxlen_stat[pfxlen][1] += valid
                     total_pfx_ok += 1
 
         of.write('\n-------------------------------------------\n')
