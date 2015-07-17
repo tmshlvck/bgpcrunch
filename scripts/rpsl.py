@@ -1814,7 +1814,7 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
 
             failures = 0
             valid = 0
-            dunno = False
+            dunno = 0
             for i,(autnum, s) in enumerate(status):
                 total_hops += 1
                 
@@ -1827,19 +1827,19 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
 
                 elif s == -1:
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'Route obj failed, no-go check path'
 
                 elif s == 1:
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'LOCAL/AGGR/no-check (=dunno)'
 
                 elif s == 2:
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'NON-RIPE'
 
@@ -1858,13 +1858,13 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                 elif s == 320:
                     total_hops_syntax_dunno += 1
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'import filter syntax error -> DUNNO'
                     
                 elif s > 320 and s < 400:
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += True
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'import filter DUNNO'
                     
@@ -1883,20 +1883,20 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
                 elif s == 420:
                     total_hops_syntax_dunno += 1
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'export filter syntax error -> DUNNO'
 
                 elif s > 420 and s < 500:
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = 'export filter DUNNO'
 
                 else:
                     common.w('Unknown status in report_ripe_path_day: ', str(s))
                     total_hops_dunno += 1
-                    dunno = True
+                    dunno += 1
                     report_hop(i, True, False, errors_on_position, dunno_on_position, hops_traversed)
                     ts = "UNKNOWN"
 
@@ -1906,19 +1906,17 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
             total_path_errors += failures
 
             pfxlen=ipaddr.IPNetwork(path_vector[1]).prefixlen
-            if dunno:
-                if failures > 0:
-                    pfxlen_stat[pfxlen][2] += failures
-                    total_pfx_fail += 1
-                else:
-                    pfxlen_stat[pfxlen][3] += failures
-                    total_pfx_dunno += 1
+
+            pfxlen_stat[pfxlen][1] += valid
+            pfxlen_stat[pfxlen][2] += failures
+            pfxlen_stat[pfxlen][3] += dunno
+
+            if dunno > 0:
+                total_pfx_dunno += 1
             else:
                 if failures > 0:
-                    pfxlen_stat[pfxlen][2] += failures
                     total_pfx_fail += 1
                 else:
-                    pfxlen_stat[pfxlen][1] += valid
                     total_pfx_ok += 1
 
         of.write('\n-------------------------------------------\n')
