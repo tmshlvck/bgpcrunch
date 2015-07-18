@@ -181,8 +181,8 @@ def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
             avgt+=a
             if a>0:
                 nonzerocnt+=1
-            if nonzerocnt > 0:
-                avg.append((ts,avgt/float(nonzerocnt)))
+        if nonzerocnt > 0:
+            avg.append((ts,avgt/float(nonzerocnt)))
 
     if avg:
         common.d("bgp.gen_pathlen_timegraph creating", filenamepfx+'avg')
