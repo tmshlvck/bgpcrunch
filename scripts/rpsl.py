@@ -407,6 +407,13 @@ class AutNumRule(object):
         afi='IPV4.UNICAST'
         if self.mp:
             r=AFI_MATCH.match(self.text)
+            ############# HACK HACK HACK !!! fix of a syntax error in RIPE DB in object
+            ############# aut-num AS2852 (cesnet) that contains weird line with merged
+            ############# afi spec and
+            if not r:
+                r=re.match('^AFI\s+(IPV6.UNICAST)(FROM.*)$', self.text)
+            ############# END OF HACK
+
             if r:
                 afi=r.group(1)
                 e=r.group(1)
