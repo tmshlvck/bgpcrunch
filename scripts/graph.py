@@ -56,7 +56,7 @@ def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',x
     HEADER=COMMON_HEADER+'''set term '''+OUTPUT_TERM+'''
 set output "''' + filepfx + '.' + OUTPUT_SUFFIX + '''"
 set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
-set xlabel "'''+ xlabel +''''"
+set xlabel "'''+ xlabel + '''"
 set ylabel "''' + ylabel + '''"
 ''' + ('set xrange ['+str(xrange[0])+','+str(xrange[1])+']' if xrange else '')+'''
 '''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
@@ -128,7 +128,7 @@ set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
 set dgrid3d '''+dsgridx+','+dsgridy+'''
 set hidden3d
 set xlabel "''' + xlabel + '''"
-set ylabel "'''+ ylabel +''''"
+set ylabel "'''+ ylabel +'''"
 set zlabel "''' + zlabel + '''"
 '''+('set xdata time' if xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
