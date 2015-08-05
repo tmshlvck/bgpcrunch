@@ -623,7 +623,7 @@ class AutNumRule(object):
                 raise Exception("Can not parse parentheses in filter:", fltr)
 
         # Atomic statements
-        
+
         if fltr.strip() == 'ANY':
             return 0
 
@@ -1651,7 +1651,9 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
 
         previous_as = (aspath[i+1] if (i+1)<len(aspath) else None)
 
-        res = check_ripe_path_step(path_vector[1], asn, aspath[i+1:], previous_as, next_as,
+        relative_aspath = aspath[i+1:] if (i+1)<len(aspath) else [aspath[-1]]
+
+        res = check_ripe_path_step(path_vector[1], asn, relative_aspath, previous_as, next_as,
                                    autnum_dir, asset_dir, routeset_dir, filterset_dir, prngset_dir, ipv6)
         if res == 2: # means that the ASN is out of RIPE region
             allinripe = False
@@ -2334,7 +2336,7 @@ def module_postprocess(days, ianadir, host, ipv6):
 def main():
 #    raise Exception("This test does not work unless special environment is set.")
 
-    testdir='/home/brill/ext/tmp'
+    testdir='/home/brill/ext/ripe-2015-06-21'
     route_testfile=testdir+RIPE_DB_ROUTE
     route6_testfile=testdir+RIPE_DB_ROUTE6
     autnum_testfile=testdir+RIPE_DB_AUTNUM
@@ -2390,13 +2392,16 @@ def main():
         fltrset_dir=HashObjectDir(fltrset_testfile, FilterSetObject)
         prngset_dir=HashObjectDir(peeringset_testfile, PeeringSetObject)
 
-        r=check_ripe_path(['>', '1.2.3.0/24', '1.2.3.4', '1 2 3 i'], autnum_dir, asset_dir, routeset_dir, fltrset_dir, False, None)
+#        r=check_ripe_path(['>', '1.2.3.0/24', '1.2.3.4', '1 2 3 i'], autnum_dir, asset_dir, routeset_dir, fltrset_dir, False, None)
+#        print str(r)
+
+        r=check_ripe_path(['*>i', '2.5.0.0/16', '217.31.48.125', '6939 1299 5511 3215 i'], autnum_dir, asset_dir, routeset_dir, fltrset_dir, False, None)
         print str(r)
 
         r=check_ripe_path_step('1.2.3.0/24', 'AS29134', ['AS1', 'AS2', 'AS8422', 'AS44672'],
                                'AS6939', 'AS44672', # from AS6939 to AS44672 via AS29134
                                autnum_dir, asset_dir, routeset_dir, fltrset_dir, prngset_dir, False)
-        
+
         print str(r)
 
 
@@ -2421,7 +2426,7 @@ def main():
             ('AS12779:FLTR-BOGONS-V6', '2001::/22', normalize_aspath('1 2 3 i'), True),
             ('AS12779:FLTR-BOGONS-V6', '2001:2a02::/48', normalize_aspath('1 2 3 i'), True),
         ]
-        
+
         #AutNumRule.matchFilter(fltr, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
         for t in tests:
             print str(t)+":"
