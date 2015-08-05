@@ -1343,32 +1343,36 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
     total_nonripe=0
     total=0
 
-    outpick=[]
-    for r in route_list:
-        # r = (prefix, as-path, routeObj or None, status)
-        # status: 0=OK, 1=aggregate, 2=missing origin, 3=not match,
-        # 4=not found, 5=non-RIPE NCC
-        
-        total+=1
-
-        if r[3]==0:
-            total_ok+=1
-        elif r[3]==1:
-            total_aggregate+=1
-        elif r[3]==2:
-            total_missing+=1
-        elif r[3]==3:
-            total_notmatch+=1
-        elif r[3]==4:
-            total_notfound+=1
-        elif r[3]==5:
-            total_nonripe+=1
-        else:
-            raise Exception("Unknown status in "+str(r))
-
     filename=outdir+(RIPE_BGP2ROUTES6_TXT if ipv6 else RIPE_BGP2ROUTES4_TXT)
     common.d("Generating file", filename)
     with open(filename, 'w') as of:
+
+        for r in route_list:
+            # r = (prefix, as-path, routeObj or None, status)
+            # status: 0=OK, 1=aggregate, 2=missing origin, 3=not match,
+            # 4=not found, 5=non-RIPE NCC
+
+            total+=1
+
+            if r[3]==0:
+                total_ok+=1
+            elif r[3]==1:
+                total_aggregate+=1
+            elif r[3]==2:
+                total_missing+=1
+            elif r[3]==3:
+                total_notmatch+=1
+            elif r[3]==4:
+                total_notfound+=1
+            elif r[3]==5:
+                total_nonripe+=1
+            else:
+                raise Exception("Unknown status in "+str(r))
+
+            if r[3]!=0:
+                of.write('%s (%s): %s'%(str(r[0]), str(r[1]), RIPE_ROUTES_MATCH_LEGEND[r[3]]))
+
+        of.write('-'*20)
         of.write("%s: %d\n"%('total', total))
         of.write("%s: %d\n"%(RIPE_ROUTES_MATCH_LEGEND[0], total_ok))
         of.write("%s: %d\n"%(RIPE_ROUTES_MATCH_LEGEND[1], total_aggregate))
@@ -1726,8 +1730,8 @@ def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None, p
     count = 0
     for path_vector in bgpdump:
         count+=1
-        if count % 1000 == 0:
-            print 'Progress: %d of %d'%(count, len(bgpdump))
+#        if count % 1000 == 0:
+#            print 'Progress: %d of %d'%(count, len(bgpdump))
         if bestonly and not (path_vector[0] and '>' in path_vector[0]):
             continue
 
