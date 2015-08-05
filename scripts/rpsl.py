@@ -258,11 +258,14 @@ class RouteObjectDir(object):
 
 # Aut-num object machinery
 
-FACTOR_SPLIT_ACCEPT='ACCEPT'
-FACTOR_SPLIT_ANNOUNCE='ANNOUNCE'
-FACTOR_SPLIT_NETWORKS='NETWORKS'
-FACTOR_SPLIT_FROM=re.compile('FROM\s+')
-FACTOR_SPLIT_TO=re.compile('TO\s+')
+FACTOR_SPLIT_ACCEPT='ACCEPT' # regexp would be better but slower
+FACTOR_SPLIT_ANNOUNCE='ANNOUNCE' # regexp would be better but slower
+FACTOR_SPLIT_NETWORKS='NETWORKS' # regexp would be better but slower
+FACTOR_CONST_ACCEPT='ACCEPT'
+FACTOR_CONST_ANNOUNCE='ANNOUNCE'
+FACTOR_CONST_NETWORKS='NETWORKS'
+FACTOR_SPLIT_FROM=re.compile('^(|.*\s+)FROM\s+')
+FACTOR_SPLIT_TO=re.compile('^(|.*\s+)TO\s+')
 AFI_MATCH=re.compile('^AFI\s+([^\s]+)\s+(.*)$')
 
 IMPORT_FACTOR_MATCH=re.compile('^FROM\s+([^\s]+)(\s+(.*)?\s?ACCEPT(.+))?$')
@@ -325,15 +328,17 @@ class AutNumRule(object):
         # defaults for rules like: export: default to AS1234
         sel=e
         fltr=''
+        
+        # regexps would be better but slower
         if e.find(FACTOR_SPLIT_ACCEPT)>-1:
             [sel,fltr] = e.split(FACTOR_SPLIT_ACCEPT, 1)
-            fltr=(FACTOR_SPLIT_ACCEPT+' '+fltr).strip()
+            fltr=(FACTOR_CONST_ACCEPT+' '+fltr.strip())
         elif e.find(FACTOR_SPLIT_ANNOUNCE)>-1:
             [sel,fltr] = e.split(FACTOR_SPLIT_ANNOUNCE, 1)
-            fltr=(FACTOR_SPLIT_ANNOUNCE+' '+fltr).strip()
+            fltr=(FACTOR_CONST_ANNOUNCE+' '+fltr.strip())
         elif e.find(FACTOR_SPLIT_NETWORKS)>-1:
             [sel,fltr] = e.split(FACTOR_SPLIT_NETWORKS, 1)
-            fltr=(FACTOR_SPLIT_NETWORKS+' '+fltr).strip()
+            fltr=(FACTOR_CONST_NETWORKS+' '+fltr.strip())
         else:
             if defaultRule: # default: rule does not need to include filter, then default to ANY
                 fltr='ANY'
@@ -341,11 +346,12 @@ class AutNumRule(object):
                 common.w("Syntax error: Can not find selectors in:", e, "decomposing expression:", text)
                 #raise Exception("Can not find selectors in: "+e)
 
-        if len(FACTOR_SPLIT_FROM.split(sel))>1:
-            return ([str('FROM '+f.strip()) for f in FACTOR_SPLIT_FROM.split(sel)[1:]], fltr)
+        # here regexps are necessary
+        if len(FACTOR_SPLIT_FROM.split(sel))>2:
+            return ([str('FROM '+f.strip()) for f in FACTOR_SPLIT_FROM.split(sel)[2:]], fltr)
 
-        elif len(FACTOR_SPLIT_TO.split(sel))>1:
-            return ([str('TO '+f.strip()) for f in FACTOR_SPLIT_TO.split(sel)[1:]], fltr)
+        elif len(FACTOR_SPLIT_TO.split(sel))>2:
+            return ([str('TO '+f.strip()) for f in FACTOR_SPLIT_TO.split(sel)[2:]], fltr)
 
         else:
             raise Exception("Can not find filter factors in: '"+sel+"' in text: "+text)
@@ -566,7 +572,7 @@ class AutNumRule(object):
         origin=(currentAsPath[-1].strip() if currentAsPath else '')
         if not fltr:
             return 14 # empty filter -> fail
-        fltr=fltr.strip()
+        fltr=fltr.strip().rstrip(';').strip()
 
 
         # Recrusion for composed filters (with NOT, AND and OR)
@@ -801,7 +807,7 @@ class AutNumRule(object):
 
             else:
                 #raise Exception("Can not expand subject: "+str(f[0]))
-                common.w("Can not expand subject:", str(f[0]))
+                common.w("Can not expand subject:", str(f[0]), 'in rule', self.text)
                 return 2
 
         # No match of factor for the subject means that the prefix should not appear
@@ -2413,6 +2419,7 @@ def main():
         asset_dir=HashObjectDir(asset_testfile, AsSetObject)
         routeset_dir=HashObjectDir(routeset_testfile, RouteSetObject)
         fltrset_dir=HashObjectDir(fltrset_testfile, FilterSetObject)
+        prngset_dir=HashObjectDir(peeringset_testfile, PeeringSetObject)
 
         tests=[
             ('ANY', '1.2.3.0/24', normalize_aspath('1 2 3 i'), False),
@@ -2431,11 +2438,21 @@ def main():
             ('AS12779:FLTR-BOGONS-V6', '2001:2a02::/48', normalize_aspath('1 2 3 i'), True),
         ]
 
+#        tests=[('AS44515;', '46.232.210.0/24', normalize_aspath('44515 i'), False),
+#               ('', '46.232.210.0/24', normalize_aspath('44515 i'), False) ]
+
         #AutNumRule.matchFilter(fltr, prefix, currentAsPath, assetDirectory, fltrsetDirectory, rtsetDirectory, ipv6)
         for t in tests:
             print str(t)+":"
             print str(AutNumRule.matchFilter(t[0], t[1], t[2], asset_dir, fltrset_dir, routeset_dir, t[3]))
             print "---------------------------------------------------------"
+
+        # another practical test
+        r=AutNumExportRule('TO AS-WIFIWEB-TRANSITO ANNOUNCE AS-WIFIWEB-SET',False)
+        res=r.match('AS174', '1.2.3.0/24', normalize_aspath('47358 i'), asset_dir, fltrset_dir,
+                           routeset_dir, prngset_dir, False)
+        print str(r)+" matching... should be 0: "+str(res)
+        
     
 
 #    test_routes()
@@ -2444,8 +2461,8 @@ def main():
 #    test_fltrsets()
 #    test_routesets()
 #    test_peeringsets()
-    test_autnum()
-#    test_filters()
+#    test_autnum()
+    test_filters()
 
 
 if __name__ == '__main__':
