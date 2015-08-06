@@ -883,6 +883,9 @@ class AutNumObject(RpslObject):
     DEFAULT_ATTR="DEFAULT"
     MP_DEFAULT_ATTR="MP-DEFAULT"
     MEMBEROF_ATTR="MEMBER-OF"
+    STATUS_ATTR="STATUS"
+
+    ASN_STATUS_ASSIGNED='ASSIGNED'
     
     def __init__(self,textlines):
         RpslObject.__init__(self,textlines)
@@ -892,6 +895,7 @@ class AutNumObject(RpslObject):
         self.mp_import_list=[]
         self.mp_export_list=[]
         self.memberof_list=[]
+        self.status=self.ASN_STATUS_ASSIGNED
 
         for (a,v) in RpslObject.splitLines(self.text):
             if a==self.AUTNUM_ATTR:
@@ -919,6 +923,8 @@ class AutNumObject(RpslObject):
 
             elif a==self.MEMBEROF_ATTR:
                 self.memberof_list = self.memberof_list + list([m.strip() for m in v.split(',')])
+            elif a==self.STATUS_ATTR:
+                self.status = v.strip().upper()
             else:
                 pass # ignore unrecognized lines
 
@@ -1574,6 +1580,11 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
 
     if asn in autnum_dir.table:
         autnum=autnum_dir.table[asn]
+
+        if autnum.status != AutNumObject.ASN_STATUS_ASSIGNED:
+            common.d("ASN", str(autnum.aut_num), "contains status", str(autnum.status), "-> DUNNO shortcut")
+            return 2
+        
         import_match=False
         export_match=False
         status=0
