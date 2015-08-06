@@ -267,6 +267,9 @@ FACTOR_CONST_NETWORKS='NETWORKS'
 FACTOR_SPLIT_FROM=re.compile('^(|.*\s+)FROM\s+')
 FACTOR_SPLIT_TO=re.compile('^(|.*\s+)TO\s+')
 AFI_MATCH=re.compile('^AFI\s+([^\s]+)\s+(.*)$')
+################# HACK HACK HACK
+AFI_MATCH_HACK=re.compile('^AFI\s+(IPV6.UNICAST)(FROM.*)$')
+################# END OF HACK
 
 IMPORT_FACTOR_MATCH=re.compile('^FROM\s+([^\s]+)(\s+(.*)?\s?ACCEPT(.+))?$')
 EXPORT_FACTOR_MATCH=re.compile('^TO\s+([^\s]+)(\s+(.*)?\s?ANNOUNCE(.+))?$')
@@ -405,23 +408,25 @@ class AutNumRule(object):
         """
 
         afi='IPV4.UNICAST'
+        text=self.text
         if self.mp:
             r=AFI_MATCH.match(self.text)
             ############# HACK HACK HACK !!! fix of a syntax error in RIPE DB in object
             ############# aut-num AS2852 (cesnet) that contains weird line with merged
             ############# afi spec and
-            if not r:
-                r=re.match('^AFI\s+(IPV6.UNICAST)(FROM.*)$', self.text)
+            rh=AFI_MATCH_HACK.match(self.text)
+            if rh:
+                r=rh
             ############# END OF HACK
 
             if r:
                 afi=r.group(1)
-                e=r.group(1)
+                text=r.group(2)
             else:
                 afi='ANY'
 
         defaultRule = (self.__class__.__name__ == 'AutNumDefaultRule')
-        factors=AutNumRule._decomposeExpression(self.text, defaultRule)
+        factors=AutNumRule._decomposeExpression(text, defaultRule)
 
         return (afi,[AutNumRule._normalizeFactor(f, factors[1]) for f in factors[0]])
 
