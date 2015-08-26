@@ -130,7 +130,7 @@ set hidden3d
 set xlabel "''' + xlabel + '''"
 set ylabel "'''+ ylabel +'''"
 set zlabel "''' + zlabel + '''"
-'''+('set xdata time' if xlabel=='Date' else '')+'''
+'''+('set xdata time' if False and xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
 
 splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"
@@ -142,7 +142,7 @@ splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"
         for d in data:
             if not lastdate==d[0]:
                 f.write("\n")
-                lastdate=d[0]
+#                lastdate=d[0]
             f.write(str(d[0])+' '+str(d[1])+' '+str(d[2])+"\n")
 
     subprocess.call([GNUPLOT_BIN,filepfx+SCRIPT_SUFFIX])
