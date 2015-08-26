@@ -141,8 +141,8 @@ splot "-" using 1:2:3 with lines ls 1 title "''' + title + '''"
         lastdate=data[0][0]
         for d in data:
             if not lastdate==d[0]:
-                f.write("\n")
-#                lastdate=d[0]
+#                f.write("\n")
+                lastdate=d[0]
             f.write(str(d[0])+' '+str(d[1])+' '+str(d[2])+"\n")
 
     subprocess.call([GNUPLOT_BIN,filepfx+SCRIPT_SUFFIX])
