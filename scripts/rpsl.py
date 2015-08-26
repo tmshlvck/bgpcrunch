@@ -1394,7 +1394,7 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
                 raise Exception("Unknown status in "+str(r))
 
             if r[3]!=0:
-                of.write('%s (%s): %s'%(str(r[0]), str(r[1]), RIPE_ROUTES_MATCH_LEGEND[r[3]]))
+                of.write('%s (%s): %s\n'%(str(r[0]), str(r[1]), RIPE_ROUTES_MATCH_LEGEND[r[3]]))
 
         of.write('-'*20)
         of.write("%s: %d\n"%('total', total))
@@ -1582,7 +1582,7 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
         autnum=autnum_dir.table[asn]
 
         if autnum.status != AutNumObject.ASN_STATUS_ASSIGNED:
-            common.d("ASN", str(autnum.aut_num), "contains status", str(autnum.status), "-> DUNNO shortcut")
+            #common.d("ASN", str(autnum.aut_num), "contains status", str(autnum.status), "-> DUNNO shortcut")
             return 2
         
         import_match=False
