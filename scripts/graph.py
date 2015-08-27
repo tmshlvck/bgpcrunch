@@ -19,7 +19,7 @@
 import subprocess
 
 
-GNUPLOT_BIN='/usr/bin/gnuplot'
+GNUPLOT_BIN='/usr/bin/gnuplot5'
 SCRIPT_SUFFIX='.gnu'
 OUTPUT_TERM='pngcairo transparent enhanced font "arial,10" fontscale 1.0 size 800,600'
 OUTPUT_SUFFIX='png'
@@ -62,6 +62,7 @@ set ylabel "''' + ylabel + '''"
 '''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
 '''+('set xdata time' if xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
+set offset 0, 0, graph 0.1, 0
 
 plot "-" using 1:2 with lines ls 1 title "''' + title + '''"
 '''
@@ -86,6 +87,7 @@ set ylabel "''' + ylabel + '''"
 '''+ ('set yrange ['+str(yrange[0])+','+str(yrange[1])+']' if yrange else '')+'''
 '''+('set xdata time' if xlabel=='Date' else '')+'''
 set timefmt "%Y-%m-%d"
+set offset 0, 0, graph 0.1, 0
 
 plot'''
 
@@ -120,7 +122,7 @@ def gen_3dplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',zla
         raise Exception("Can not generate empty plot! Gnuplot will fail subsequently.")
     
     dsgridx='30'
-    dsgridy='30'
+    dsgridy='60'
    
     HEADER=COMMON_HEADER+'''set term '''+OUTPUT_TERM+'''
 set output "''' + filepfx + '.'+OUTPUT_SUFFIX+'''"
