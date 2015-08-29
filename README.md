@@ -25,18 +25,20 @@ http://www.iana.org/assignments/ipv6-unicast-address-assignments/ipv6-unicast-ad
 
 The data directory should look like this:
 
+```
 ./data
-./data/marge
-./data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
-./data/marge/bgp-ipv4-2014-04-02-01-17-03.txt.bz2
-./data/marge/bgp-ipv4-2014-04-03-01-17-02.txt.bz2
-./data/marge/bgp-ipv6-2014-04-01-01-17-01.txt.bz2
-./data/marge/bgp-ipv6-2014-04-02-01-17-03.txt.bz2
-./data/marge/bgp-ipv6-2014-04-03-01-17-02.txt.bz2
-./data/ripe
-./data/ripe/ripedb-2014-04-02-02-19-01.tar.bz2
-./data/ipv4-address-space.csv
-./data/ipv6-unicast-address-assignments.csv
+  ./data/marge
+    ./data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
+    ./data/marge/bgp-ipv4-2014-04-02-01-17-03.txt.bz2
+    ./data/marge/bgp-ipv4-2014-04-03-01-17-02.txt.bz2
+    ./data/marge/bgp-ipv6-2014-04-01-01-17-01.txt.bz2
+    ./data/marge/bgp-ipv6-2014-04-02-01-17-03.txt.bz2
+    ./data/marge/bgp-ipv6-2014-04-03-01-17-02.txt.bz2
+  ./data/ripe
+    ./data/ripe/ripedb-2014-04-02-02-19-01.tar.bz2
+  ./data/ipv4-address-space.csv
+  ./data/ipv6-unicast-address-assignments.csv
+```
 
 Please note: We have BGP data for more days than RIPE DB snapshots. It is
 not a problem, BGP cruncher will find intersection of available dates and
@@ -44,12 +46,20 @@ attempt to generate results only for days that we have complete data for.
 
 
 Basic usage:
+
+```
 cd scripts
 ./run_all.py
-
+```
 
 Output:
-TODO
+
+It generates extensive output to resutls directory. The output
+consists of:
+- byproducts - *.picke files
+- daily outputs that covers one day analysis of BGP (text and plots)
+- summary analysis for each days in form of plots
+- route object violation timeline (text) in route_violations_timeline{,6}
 
 
 More advanced usage:
