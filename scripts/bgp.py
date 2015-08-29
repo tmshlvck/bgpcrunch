@@ -66,7 +66,7 @@ def gen_buckets(bgpdump,ipv6=False,bestonly=False):
     Reads Cisco show ip bgp output captured in a file and returns
     list of lists of path length where:
     r=gen_buckets(...)
-    r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
+    r[16]=[x,y,z,...] ; x,y,z are ints. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
 
     bgpdump - data structure of parsed show ip bgp dump
@@ -214,6 +214,7 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
         filenamepfx=filenamepfx+'/pfxcount4-'
 
     sumall=[]
+    avgpfxlen=[]
     counts=[]
     for i in range(0,rng+1):
         counts.append([])
@@ -221,16 +222,23 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
     times=sorted(bucket_matrix.keys())
     for t in times:
         s=0
+        apl=0
         ts=str(t)
         for i in range(0,rng+1):
             cnt=len(bucket_matrix[t][i])
             s+=cnt
+            apl+=cnt*i
             counts[i].append((ts,cnt))
         sumall.append((ts,s))
+        avgpfxlen.append(ts,apl/s)
 
     if sumall:
         common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+'sum')
         graph.gen_lineplot(sumall,filenamepfx+'sum', ylabel='Prefix count', title='\# of pfxes')
+
+    if avgpfxlen:
+        common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+'avgpfxlen')
+        graph.gen_lineplot(avgpfxlen,filenamepfx+'avgpfxlen', ylabel='avg pfx length', title='BGP average')
 
     for i in range(0,rng+1):
         if counts[i]:
@@ -242,7 +250,7 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
 
 def create_path_matrix(host, days, ipv6=False):
     """ Generate matrix: [t:buckets,...] where buckets (r) contains
-    r[16]=[x,y,z,...] ; x,y,z are strings. It means that there was
+    r[16]=[x,y,z,...] ; x,y,z are ints. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
     """
     bucket_matrix={}
