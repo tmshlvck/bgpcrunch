@@ -17,11 +17,11 @@ cat <<EOF
 <title>BGPCrunch results</title>
 </head>
 <body>
-<h1>bgpcrunch complete results</h1>
+<h1>Bgpcrunch complete results</h1>
 <p>BGP analysis results of <b>AS29134</b> BGP feed and <b>RIPE DB</b> snapshots archive.</p>
 <p>Analysis has been conducted by <a href="https://github.com/tmshlvck/bgpcrunch">
 https://github.com/tmshlvck/bgpcrunch</a>.</p>
-<p>Last update: Aug 29, 2015, Copyright: Tomas Hlavacek 2012-2015</p>
+<p>Last update: Aug 29, 2015, Copyright: 2012-2015 Tomas Hlavacek (tmshlvck(at)gmail.com)</p>
 <p>Special thanks to: AS29134 (Ignum, s.r.o.)</p>
 
 EOF
@@ -40,6 +40,18 @@ cat << EOF
 <img src="${URL_PREFIX}pfxcount6-sum.png">
 <figcaption>IPv6 prefixes in BGP</figcaption>
 </figure>
+
+<h3>Average prefix length</h3>
+<figure>
+<img src="${URL_PREFIX}pfxcount4-avgpfxlen.png">
+<figcaption>IPv4 prefixes in BGP</figcaption>
+</figure>
+
+<figure>
+<img src="${URL_PREFIX}pfxcount6-avgpfxlen.png">
+<figcaption>IPv6 prefixes in BGP</figcaption>
+</figure>
+
 
 <h3>Average path length</h3>
 
