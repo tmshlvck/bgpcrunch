@@ -227,16 +227,16 @@ echo "]</p>"
 
 
 cat << EOF
-<h3>Observed avgerage pathlen per RIR</h3>
+<h3>Observed avgerage prefix len per RIR</h3>
 
 <figure>
 <img src="${URL_PREFIX}rirpfxlen4-marge.png">
-<figcaption>IPv4 BGP average path length per RIR</figcaption>
+<figcaption>IPv4 BGP average prefix length per RIR</figcaption>
 </figure>
 
 <figure>
 <img src="${URL_PREFIX}rirpfxlen6-marge.png">
-<figcaption>IPv6 BGP average path length per RIR</figcaption>
+<figcaption>IPv6 BGP average prefix length per RIR</figcaption>
 </figure>
 EOF
 
