@@ -230,7 +230,7 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
             apl+=cnt*i
             counts[i].append((ts,cnt))
         sumall.append((ts,s))
-        avgpfxlen.append(ts,apl/s)
+        avgpfxlen.append((ts,(float(apl)/s)))
 
     if sumall:
         common.d("bgp.gen_prefixcount_timegraph creating", filenamepfx+'sum')
