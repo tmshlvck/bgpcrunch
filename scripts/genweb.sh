@@ -243,8 +243,7 @@ EOF
 ### Daily route results
 
 echo "<h2>Daily IPv4 BGP route matching report (text)</h2>"
-<p>The output contains only prefixes that failed to verify
-or that can not be verified.</p>
+echo "<p>The output contains only prefixes that failed to verify or that can not be verified.</p>"
 echo "<p> ["
 files=( `grep -E "bgp2routes.txt" $SRC | sort -d` )
 for f in ${files[@]}; do
@@ -258,8 +257,7 @@ done
 echo "]</p>"
 
 echo "<h2>Daily IPv6 BGP route matching report (text)</h2>"
-<p>The output contains only prefixes that failed to verify
-or that can not be verified.</p>
+echo "<p>The output contains only prefixes that failed to verify or that can not be verified.</p>"
 echo "<p> ["
 files=( `grep -E "bgp2routes6.txt" $SRC | sort -d` )
 for f in ${files[@]}; do
