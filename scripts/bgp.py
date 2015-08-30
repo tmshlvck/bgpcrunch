@@ -194,7 +194,7 @@ def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
             graph.gen_lineplot(pfxlen[i],filenamepfx+str(i), ylabel='Avg path len', title='\# of hops')
 
     if d3d:
-        graph.gen_3dplot(d3d,filenamepfx+'3d', ylabel='Prefix length', zlabel='Avg path      \nlength', title='\# of hops')
+        graph.gen_3dplot(d3d,filenamepfx+'3d', ylabel='Prefix length', zlabel=r'Avg path      \nlength', title='\# of hops')
 
 
 
