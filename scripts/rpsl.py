@@ -1510,7 +1510,8 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
         for rv in dayres:
             if rv[0] in last:
                 matched[rv[0]] = True
-                if last[rv[0]] is None or tuple(last[rv[0]]) != tuple(rv):
+                # when there is a change in as-path or status
+                if last[rv[0]] is None or last[rv[0]][1] != rv[1] or last[rv[0]][3] != rv[3]:
                     # * take the current state
                     # * take the last result vector in the timeline
                     # * compare to the actual resultvector and if it differs, there was a change, add it
