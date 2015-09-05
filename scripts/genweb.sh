@@ -289,6 +289,17 @@ for f in ${files[@]}; do
 done
 echo "]</p>"
 
+# route timeline
+cat <<EOF
+<h2>Route violations timeline</h2>
+<p>
+<a href="${URL_PREFIX}route_violations_timeline/">IPv4</a>
+</p>
+<p>
+<a href="${URL_PREFIX}route6_violations_timeline/">IPv6</a>
+</p>
+EOF
+
 # Common path results
 
 cat << EOF
@@ -408,17 +419,6 @@ for f in ${files[@]}; do
     fi
 done
 echo "]</p>"
-
-cat <<EOF
-<h2>Route violations timeline</h2>
-<p>
-<a href="${URL_PREFIX}route_violations_timeline/">IPv4</a>
-</p>
-<p>
-<a href="${URL_PREFIX}route6_violations_timeline/">IPv6</a>
-</p>
-EOF
-
 
 cat <<EOF
 </body>
