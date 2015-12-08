@@ -409,6 +409,7 @@ class AutNumRule(object):
 
         afi='IPV4.UNICAST'
         text=self.text
+#        common.d("_parseRule1 afi",afi,"text",text)
         if self.mp:
             r=AFI_MATCH.match(self.text)
             ############# HACK HACK HACK !!! fix of a syntax error in RIPE DB in object
@@ -422,8 +423,10 @@ class AutNumRule(object):
             if r:
                 afi=r.group(1)
                 text=r.group(2)
+#                common.d("_parseRule2 afi",afi,"text",text)
             else:
                 afi='ANY'
+#            common.d("_parseRule3 afi",afi,"text",text)
 
         defaultRule = (self.__class__.__name__ == 'AutNumDefaultRule')
         factors=AutNumRule._decomposeExpression(text, defaultRule)
@@ -645,6 +648,9 @@ class AutNumRule(object):
         if fltr.strip() == 'ANY':
             return 0
 
+        if fltr.strip() == 'AS-ANY':
+            return 0
+
         elif fltr.strip() == 'PEERAS':
             if origin == currentAsPath[0]: # allow as-path prepending, i.e. aspath can be [x,x,x,x] and origin x
                 return 0
@@ -776,7 +782,7 @@ class AutNumRule(object):
         # just freely intepret the aut-num objects as being multi-protocol
         # by default. (Which is not true...)
         if (not self.mp) and ipv6:
-            return False
+            return 1
 
         res=self._parseRule() # return (afi, [(subject, filter)])
 
@@ -804,6 +810,9 @@ class AutNumRule(object):
             elif AsSetObject.isAsSet(f[0]):
                 # TODO rm
                 filterdebug=f
+                if f[0] == 'AS-ANY':
+                    return AutNumRule.matchFilter(f[1], prefix, currentAsPath, assetDirectory,
+                                                      fltrsetDirectory, rtsetDirectory, ipv6)
                 if f[0] in assetDirectory.table:
                     if assetDirectory.table[f[0]].recursiveMatch(subject, assetDirectory):
                         return AutNumRule.matchFilter(f[1], prefix, currentAsPath, assetDirectory,
