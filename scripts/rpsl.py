@@ -77,22 +77,36 @@ RIPE_BGP2PATHS_PFXLEN6_GRAPH='/bgppathbypfxlen6'
 # Data model
 
 class RpslObject(object):
+    """ Abstract RPSL object """
     def __init__(self,textlines):
+        """ Init the abstract object from text.
+
+        :param textlines: List of strings.
+        """
         self.text=textlines
 
     def __repr__(self):
+        """ Return the object in text form.
+        :returns: String
+        """
         return self.__str__()
 
     def getKey(self):
-        """
-        Returns key value that should correspond to the object key in RPSL standard view.
+        """ Key value that should correspond to the object key in RPSL standard view.
         It is here for common HashObjectDirectory to use it for constructing lookup table.
+
+        :returns: String
         """
         raise Exception("This is abstract object. Dunno what my key is!")
 
     
     @staticmethod
     def cleanupLines(text):
+        """ Cleanup comments, inactive text and whitespace from the object lines.
+
+        :param text: List of lines to cleanup.
+        :returns: Iterator that returns clean lines.
+        """
         for l in text:           
             # Discard comments
             c = l.find('#')
@@ -112,7 +126,11 @@ class RpslObject(object):
     
     @staticmethod
     def splitLines(text):
-        """ Returns generator of tuples (attribute,value) and discards comments. """
+        """ Splits lines of RPSL object to attributes and values.
+
+        :param text: list of str, Text to parse and split
+        :returns: Iterator that generate tuples (attribute,value) and discards comments.
+        """
 
         buf=('','')
         for l in text:           
@@ -137,8 +155,19 @@ class RpslObject(object):
     def parseRipeFile(filename, targetClass):
         """ Parse RIPE object file of a targetClass. Theoretically more
         types might be  supported and modifier to __init__ of each class
-        has to be created. """
+        has to be created.
+
+        :param str filename: Name of file to read
+        :param targetClass: Class
+        :returns: Iterator that returns the objects
+        """
+
         def flushrobj(ot):
+            """ Generate object from the lines
+
+            :param str ot: Object text
+            :returns: Object
+            """
             if ot:
                 otl = list(RpslObject.cleanupLines(ot))
                 if otl:
@@ -174,6 +203,11 @@ class RouteObject(RpslObject):
     ORIGIN_ATTR = 'ORIGIN'
     MEMBEROF_ATTR = 'MEMBER-OF'
     def __init__(self,textlines):
+        """ Init the RouteObject from text.
+
+        :param textlines: list of str, Text representation.
+        """
+        
         RpslObject.__init__(self,textlines)
         self.route=None
         self.origin=None
@@ -203,9 +237,11 @@ class RouteObject(RpslObject):
             raise Exception("Can not create RouteObject out of text: "+str(textlines))
 
     def getKey(self):
+        """ :returns: String """
         return self.route
 
     def __str__(self):
+        """ :returns: String representation of the object """
         return 'RouteObject: '+str(self.route)+'->'+str(self.origin)
 
 
@@ -228,6 +264,12 @@ class RouteObjectDir(object):
     """
 
     def __init__(self,filename,ipv6=False):
+        """ Init the RouteObjecDir from text file.
+
+        :param str filename: Name of file to parse
+        :param bool ipv6: IPv6 flag
+        """
+        
         self.originTable={}
         if ipv6:
             self._initTreeAndTable(RpslObject.parseRipeFile(filename, Route6Object), ipv6)
@@ -235,7 +277,12 @@ class RouteObjectDir(object):
             self._initTreeAndTable(RpslObject.parseRipeFile(filename, RouteObject), ipv6)
 
     def _initTreeAndTable(self,routeobjects,ipv6):
-        """ routeobjects is supposedly a generator... """
+        """ Internat method. Do not use.
+        Initialize internal structures.
+
+        :param routeobjects: is supposedly a generator...
+        :param bool ipv6: IPv6 flag
+        """
         self.tree=common.IPLookupTree(ipv6)
         for o in routeobjects:
             self.tree.add(o.route,o)
@@ -245,9 +292,19 @@ class RouteObjectDir(object):
 
 
     def getRouteObjs(self, prefix):
+        """ Resolve route objecets for the specific prefix
+
+        :param prefix: Prefix to find
+        :returns: List of Route objects
+        """
         return self.tree.lookupNetExact(prefix)
 
     def enumerateObjs(self):
+        """ Enumerate all the route objects in the dict.
+
+        :returns: Iterator that returns the route objects
+        """
+        
         for k in self.originTable.keys():
             for o in self.originTable[k]:
                 yield o
@@ -267,7 +324,7 @@ FACTOR_CONST_NETWORKS='NETWORKS'
 FACTOR_SPLIT_FROM=re.compile('^(|.*\s+)FROM\s+')
 FACTOR_SPLIT_TO=re.compile('^(|.*\s+)TO\s+')
 AFI_MATCH=re.compile('^AFI\s+([^\s]+)\s+(.*)$')
-################# HACK HACK HACK
+################# HACK HACK HACK to fix syntax error in RIPE DB
 AFI_MATCH_HACK=re.compile('^AFI\s+(IPV6.UNICAST)(FROM.*)$')
 ################# END OF HACK
 
@@ -279,28 +336,55 @@ ASN_MATCH=re.compile('^AS[0-9]+$')
 PFX_FLTR_MATCH=re.compile('^\{([^}]*)\}(\^[0-9\+-]+)?$')
 PFX_FLTR_PARSE=re.compile('^([0-9A-F:\.]+/[0-9]+)(\^[0-9\+-]+)?$')
 REGEXP_FLTR_PARSE=re.compile('^<([^>]+)>$')
+
+PARSE_RANGE=re.compile('^\^([0-9]+)-([0-9]+)$')
+
 class AutNumRule(object):
-    """ Abstract base for internal representation of a rule in an aut-num object.
-    """
+    """ Abstract base for internal representation of a rule in an aut-num object. """
 
     def __init__(self, line, mp=False):
-        """
-        line = the rule text (value)
-        mp = mutli-protocol rule (according RFC 4012)
+        """ Init AutNumRule from line.
+
+        :param str line: The rule text (value)
+        :param bool mp: Mutli-protocol rule (according RFC 4012)
         """
 
         self.mp = mp
         self.text = line.upper()
 
     def __str__(self):
+        """ Return object string representation.
+
+        :returns: String
+        """
         return "%s%s : %s"%(self.__class__.__name__, (' MP' if self.mp else ''), self.text)
 
     def __repr__(self):
+        """ Return object string representation.
+
+        :returns: String
+        """
         return self.__str__()
 
     @staticmethod
     def _decomposeExpression(text, defaultRule=False):
+        """ Internal function. Do not use.
+        
+        :pram str text: Text to parse
+        :param bool defaultRule: Does the text contain default: instead of \
+        import: or export: line? Defaults are threated differently.
+        :returns: Tuple ([selector string], filter string)
+        :raises: Exception, message contains details
+        """
+        
         def _getFirstGroup(text):
+            """ Internal function. Do not use.
+            Returns first filter group. Remove trailing groups after set operations.
+            
+            :param str text: Text to parse
+            :returns: string that contains the first group
+            """
+            
             brc=0 # brace count
             gotgroup=False
             for i,c in enumerate(text):
@@ -363,12 +447,14 @@ class AutNumRule(object):
     @staticmethod
     def _normalizeFactor(selector, fltr):
         """
-        Returns (subject, filter) where subject is AS or AS-SET and
-        filter is a filter. For example in factor:
-        "to AS1234 announce AS-SECRETNET" : the subject is AS1234 and
-        the filter is the AS-SECRETNET; the same for factor:
-        "from AS1234 accept ANY": the subject is AS1234 and the filter
-        is ANY and the same for default factors like the following:
+        :param str selector:
+        :param str fltr:
+        :returns: (subject, filter) where subject is AS or AS-SET and \
+        filter is a filter. For example in factor: \
+        "to AS1234 announce AS-SECRETNET" : the subject is AS1234 and \
+        the filter is the AS-SECRETNET; the same for factor: \
+        "from AS1234 accept ANY": the subject is AS1234 and the filter \
+        is ANY and the same for default factors like the following: \
         "to AS1234 networks ANY"
         """
 
@@ -393,7 +479,7 @@ class AutNumRule(object):
 
     def _parseRule(self):
         """
-        Returns (afi, [(subject, filter)]). Remove all refine and except blocks
+        :returns: (afi, [(subject, filter)]). Remove all refine and except blocks\
         as well as protocol and to specs.
 
         The (subject, filter) are taken from factors where subject is
@@ -433,23 +519,51 @@ class AutNumRule(object):
 
     @staticmethod
     def isASN(asn):
+        """ Tests ID type.
+
+        :param str asn: String to test
+        :returns: True if the ID is ASN, False otherwise
+        """
         return ASN_MATCH.match(str(asn).strip()) != None
 
 
     @staticmethod
     def isPfxFilter(fltr):
+        """ Tests string type.
+
+        :param str fltr: String to test
+        :returns: True if the string is pfx filter, False otherwise
+        """
         return PFX_FLTR_MATCH.match(fltr) != None
 
     @staticmethod
     def isPfx(pfx):
+        """ Tests string type.
+
+        :param str pfx: String to test
+        :returns: True if the string is prefix specifier, False otherwise
+        """
         return PFX_FLTR_PARSE.match(pfx) != None
 
     @staticmethod
     def matchPfxFltr(fltr, prefix, ipv6):
+        """ Try to match the prefix filter with the prefix.
+
+        :param str fltr: Filter to match
+        :param str prefix: Prefix to match
+        :param bool ipv6: IPv6 flag
+        :returns: True when prefix matches the filter, False otherwise
+        """
         #common.d("matchPfxFltr:", fltr, prefix)
         
         def _parseRange(rng, lowbound, ipv6):
-            PARSE_RANGE=re.compile('^\^([0-9]+)-([0-9]+)$')
+            """ Parse range in the RPSL prefix filter.
+
+            :param str rng: Range string
+            :param int lowbound: Default low bound
+            :param bool ipv6: IPv6 flag
+            """
+
             maxpl = 128 if ipv6 else 32
             rng=rng.strip()
                 
@@ -509,15 +623,23 @@ class AutNumRule(object):
 
     @staticmethod
     def isAsPathRegExp(fltr):
+        """ Tests string type.
+
+        :param str fltr: String to test
+        :returns: True if the string is AS-path regexp, False otherwise
+        """
         return REGEXP_FLTR_PARSE.match(fltr) != None
 
     @staticmethod
     def matchAsPathRegExp(fltr, asPath):
-        """
-        Apply regexp from regexp filter. This is a bit bold because
+        """ Apply regexp from regexp filter. This is a bit bold because
         we just use Python's re.
 
         Allocated failure code is 13 and dunno code 21. OK=0.
+
+        :param str fltr: Filter string
+        :param asPath: AS path to match
+        :returns: int, 0 if the AS-path matches the filter, non-zero error code otherwise
         """
 
         if len(asPath) == 0:
@@ -561,22 +683,32 @@ class AutNumRule(object):
         """ Matches filter fltr to prefix with currentAsPath.
         Using assetDirectory, fltrsetDirectory and rtsetDirectory.
 
-        Returns:
-        0 when filter matches (=OK)
-        1-3 are reserved for calling functions
-        4 when fltr ASN != origin
-        5 when as-set recursive match fails
-        6 when unknown as-set is in the filter
-        7 PeerAS match failed
-        8 { prefix^range } match failed
-        9 composed expression failed
-        10 unknown fltr-set
-        11 unkown route-set or route-set not match
-        13 regexp failed to validate
-        14 empty filter (None or '')
-        20 unknown filter (=dunno)
-        21 unknown regexp (=dunno)
-        22 community can not be decided (=dunno)
+        :param str fltr: Filter to match
+        :param str prefix: Prefix to match
+        :param currentAsPath: list of strings, Current AS from the matching AS point of view
+        :param HashObjectDir assetDirectory: HashObjectDir instance that contains AsSet objs
+        :param HashObjectDir fltrsetDirectory: HashObjectDir instance that contains FltrSet objs
+        :param HashObjectDir rtsetDirectory: HashObjectDir instance that contains RtSet objs
+        :param bool ipv6: IPv6 flag
+        :param recursion_list: list of keys of objects traversed because of recursion
+        :returns: Error code
+
+        Error codes:
+          * 0 when filter matches (=OK)
+          * 1-3 are reserved for calling functions
+          * 4 when fltr ASN != origin
+          * 5 when as-set recursive match fails
+          * 6 when unknown as-set is in the filter
+          * 7 PeerAS match failed
+          * 8 { prefix^range } match failed
+          * 9 composed expression failed
+          * 10 unknown fltr-set
+          * 11 unkown route-set or route-set not match
+          * 13 regexp failed to validate
+          * 14 empty filter (None or '')
+          * 20 unknown filter (=dunno)
+          * 21 unknown regexp (=dunno)
+          * 22 community can not be decided (=dunno)
         """
         
         #common.d("Matching filter", fltr, 'prefix', prefix, 'currentAsPath', str(currentAsPath))
@@ -750,24 +882,24 @@ class AutNumRule(object):
 
     def match(self, subject, prefix, currentAsPath, assetDirectory, fltrsetDirectory,
               rtsetDirectory, prngsetDirectory, ipv6=False):
-        """
-        Interpret the rule and decide whether a prefix should be accepted or not.
+        """ Interpret the rule and decide whether a prefix should be accepted or not.
 
-        subject = AS that is announcing the prefix to or as that the prefix is exported to by
-        the AS that conains this rule
-        prefix = prefix that is in question
-        currentAsPath = aspath as it is (most likely) seen by the AS
-        assetDirectory = HashObjectDir that conains the AsSetObjects
-        fltrsetDirectory = HashObjectDir that conains the FilterSetObjects
-        rtsetDirectory = HashObjectDir that conains the RouteSetObjects
-        ipv6 = matching IPv6 route?
+        :param subject: AS that is announcing the prefix to or as that the prefix is exported to \
+        by the AS that conains this rule
+        :param prefix: prefix that is in question
+        :param currentAsPath: aspath as it is (most likely) seen by the AS
+        :param assetDirectory: HashObjectDir that conains the AsSetObjects
+        :param fltrsetDirectory: HashObjectDir that conains the FilterSetObjects
+        :param rtsetDirectory: HashObjectDir that conains the RouteSetObjects
+        :param bool ipv6: matching IPv6 route?
+        :returns: Status code
 
-        returns:
-        0 when match is OK
-        1 when AFI does not match
-        2 when subject can not be expanded (= not ASN nor AS-SET)
-        3 when not match for the subject has been found in factors
-        >=4 and filter match failed (see AutNumRule.matchFilter for details)
+        Status code:
+          * 0 when match is OK
+          * 1 when AFI does not match
+          * 2 when subject can not be expanded (= not ASN nor AS-SET)
+          * 3 when not match for the subject has been found in factors
+          * >=4 and filter match failed (see AutNumRule.matchFilter for details)
         """
 
         # Fast-path, fail for IPv6 with non-MP rule
@@ -833,9 +965,10 @@ class AutNumImportRule(AutNumRule):
     """
 
     def __init__(self, line, mp=False):
-        """
-        line = the rule text (value)
-        mp = mutli-protocol rule (according RFC 4012)
+        """ Init the object from text line.
+
+        :param str line: the rule text (value)
+        :param bool mp: mutli-protocol rule (according RFC 4012)
         """
         AutNumRule.__init__(self, line, mp)
 
@@ -847,9 +980,10 @@ class AutNumDefaultRule(AutNumRule):
     """
 
     def __init__(self, line, mp=False):
-        """
-        line = the rule text (value)
-        mp = mutli-protocol rule (according RFC 4012)
+        """ Init the object from text line.
+
+        :param str line: the rule text (value)
+        :param bool mp: mutli-protocol rule (according RFC 4012)
         """
         AutNumRule.__init__(self, line, mp)
 
@@ -862,9 +996,9 @@ class AutNumExportRule(AutNumRule):
     """
 
     def __init__(self, line, mp=False):
-        """
-        line = the rule text (value)
-        mp = mutli-protocol rule (according RFC 4012)
+        """ Init the object from text line.
+        :param str line: the rule text (value)
+        :param bool mp: mutli-protocol rule (according RFC 4012)
         """
         AutNumRule.__init__(self, line, mp)
 
@@ -888,6 +1022,10 @@ class AutNumObject(RpslObject):
     ASN_STATUS_ASSIGNED='ASSIGNED'
     
     def __init__(self,textlines):
+        """ Crate the object from lines.
+
+        :param textlines: Text lines to parse
+        """
         RpslObject.__init__(self,textlines)
         self.aut_num=None
         self.import_list=[]
@@ -933,10 +1071,18 @@ class AutNumObject(RpslObject):
 
 
     def getKey(self):
+        """ Return key.
+
+        :returns: aut-num attribute value
+        """
         return self.aut_num
 
 
     def __str__(self):
+        """ Return string representation.
+
+        :returns: String
+        """
         return '''AutNumObject: %s
 import: %s
 export: %s
@@ -961,16 +1107,27 @@ class AsSetObject(RpslObject):
 
     @staticmethod
     def _parseMembers(members):
+        """ Parse members in the set object.
+
+        :param str members: The members attribute text
+        :returns: Iterator that generates text member names in upper case
+        """
         for m in members.strip().split(','):
             yield m.strip().upper()
 
     @staticmethod
     def isAsSet(name):
-        """ Returs True when the name appears to be as-set name (=key)
-        according to RPSL specs. """
+        """
+        :returns: True when the name appears to be as-set name (=key) according to RPSL specs.
+        """
         return str(name).upper().find('AS-') > -1
     
     def __init__(self,textlines):
+        """ Crate the object from text.
+
+        :param textlines: List of strings
+        """
+
         RpslObject.__init__(self,textlines)
         self.as_set=None
         self.members=[]
@@ -994,17 +1151,25 @@ class AsSetObject(RpslObject):
 
 
     def getKey(self):
+        """ Return key.
+
+        :returns: as-set attribute value
+        """
         return self.as_set
 
     def recursiveMatch(self, target, hashObjDir, recursionList=None):
-        """
-        This methods does recusion in the objects members and tries to find match
+        """ This methods does recusion in the objects members and tries to find match
         with the target identifier.
 
         This is being used by filter matching instead of full filter recursion because we
         know that this type of object could hold only ASNs or references to another
         as-sets and therefore full filter recursion is not needed and this special
         recursion offers mild speedup.
+
+        :param target: Target to find
+        :param HashObjectDir hashObjDir: Dir object that holds the data
+        :param recursionList: Recursion list to stop looping recursions
+        :returns: True if the match is found, False otherwise
         """
         
         if recursionList == None:
@@ -1028,6 +1193,62 @@ class AsSetObject(RpslObject):
 
         return False
 
+    def measureDepth(self, hashObjDir, recursionList=None):
+        """
+        This methods measures depth of the recursion tree.
+
+        The reason for having this function is debugging and statisics.
+
+        :param HashObjectDir hashObjDir: Dir object that holds the data
+        :param recursionList: Recursion list to stop looping recursion paths
+        :returns: Depth of the longest subtree
+        """
+        
+        if recursionList == None:
+            recursionList = []
+        
+        # prevent recusion loop
+        if self.getKey() in recursionList:
+            return 0
+        recursionList.append(self.getKey())
+
+        d = 0
+        for m in self.members:
+            if self.isAsSet(m) and m in hashObjDir.table:
+                r = hashObjDir.table[m].measureDepth(hashObjDir, recursionList)
+                if r>d:
+                    d = r
+
+        return d+1
+
+    def measureSubtreeSize(self, hashObjDir, recursionList=None):
+        """
+        This methods measures depth of the recursion tree.
+
+        The reason for having this function is debugging and statisics.
+
+        :param HashObjectDir hashObjDir: Dir object that holds the data
+        :param recursionList: Recursion list to stop looping recursion paths
+        :returns: Size of the largest subtree
+        """
+        
+        if recursionList == None:
+            recursionList = []
+        
+        # prevent recusion loop
+        if self.getKey() in recursionList:
+            return 0
+        recursionList.append(self.getKey())
+
+        d = 1
+        for m in self.members:
+            if self.isAsSet(m) and m in hashObjDir.table:
+                d += hashObjDir.table[m].measureSubtreeSize(hashObjDir, recursionList)
+
+        return d
+
+
+
     def __str__(self):
         return 'AsSetObject: %s -< %s'%(self.as_set, str(self.members))
 
@@ -1041,15 +1262,29 @@ class PeeringSetObject(RpslObject):
 
     @staticmethod
     def _parsePeering(p):
+        """
+        :param str p: Peering line
+        :returns: First portion of the peering line
+        """
         return p.strip().split(' ')[0]
 
     @staticmethod
     def isPeeringSet(name):
-        """ Returs True when the name appears to be as-set name (=key)
-        according to RPSL specs. """
+        """
+        :returns: True when the name appears to be as-set name (=key) \
+        according to RPSL specs.
+
+        :param str name: Object name
+        :returns: True if it is prng-set ID, False otherwise
+        """
         return str(name).upper().find('PRNG-') > -1
     
     def __init__(self,textlines):
+        """ Init the object from textlines
+
+        :param textlines: List of text lines
+        """
+
         RpslObject.__init__(self,textlines)
         self.peering_set=None
         self.peering=[]
@@ -1072,6 +1307,9 @@ class PeeringSetObject(RpslObject):
 
 
     def getKey(self):
+        """
+        :returns: Key (=RPSL ID) of the object
+        """
         return self.peering_set
 
     def recursiveMatch(self, target, hashObjDir, recursionList=None):
@@ -1083,6 +1321,11 @@ class PeeringSetObject(RpslObject):
         know that this type of object could hold only ASNs or references to another
         peering-sets and therefore full filter recursion is not needed and this special
         recursion offers mild speedup.
+
+        :param target: Target to match
+        :param hashObjDir: Obj dir that contains the referenced data
+        :param recursionList: List of traversed identifiers
+        :returns: True if the target has been found, False otherwise
         """
         if recursionList == None:
             recursionList = []
@@ -1106,7 +1349,37 @@ class PeeringSetObject(RpslObject):
 
         return False
 
+    def measureDepth(self, hashObjDir, recursionList=None):
+        """ This methods measures depth of the recursion tree.
+
+        The reason for having this function is debugging and statisics.
+
+        :param hashObjDir: Obj dir that contains the referenced data
+        :param recursionList: List of traversed identifiers
+        :returns: Depth of the longest recursion tree
+        """
+        
+        if recursionList == None:
+            recursionList = []
+        
+        # prevent recusion loop
+        if self.getKey() in recursionList:
+            return 0
+        recursionList.append(self.getKey())
+
+        d = 0
+        for m in (self.peering + self.mp_peering):
+            if self.isPeeringSet(m) and m in hashObjDir.table:
+                r = hashObjDir.table[m].measureDepth(hashObjDir, recursionList)
+                if r>d:
+                    d = r
+
+        return d+1
+
     def __str__(self):
+        """
+        :returns: String object representiation
+        """
         return 'PeeringSetObject: %s -< %s mp: %s'%(self.peering_set, str(self.peering), str(self.mp_peering))
 
 
@@ -1119,6 +1392,11 @@ class FilterSetObject(RpslObject):
     MP_FILTER_ATTR="MP-FILTER"
 
     def __init__(self,textlines):
+        """ Init FilterSetObject from text lines
+
+        :param textlines: List of strings containing the lines.
+        """
+        
         RpslObject.__init__(self,textlines)
         self.filter_set=None
         self.filter=None
@@ -1142,14 +1420,25 @@ class FilterSetObject(RpslObject):
 
     @staticmethod
     def isFltrSet(fltrsetid):
-        """ Returs True when the name appears to be filter-set name (=key)
-        according to RPSL specs. """
+        """
+        :returns: True when the name appears to be filter-set name (=key) \
+        according to RPSL specs.
+        """
+        
         return fltrsetid.upper().find('FLTR-') > -1
 
     def getKey(self):
+        """
+        :returns: Key of the FilterSet object.
+        """
+        
         return self.filter_set
 
     def __str__(self):
+        """
+        :returns: Text representation of the object.
+        """
+        
         f=None
         if self.filter:
             f=str(self.filter)
@@ -1170,6 +1459,11 @@ class RouteSetObject(RpslObject):
     MP_MEMBERS_ATTR="MP-MEMBERS"
 
     def __init__(self,textlines):
+        """ Init RouteSetObject from text lines
+
+        :param textlines: List of strings containing the lines.
+        """
+        
         RpslObject.__init__(self,textlines)
         self.route_set=None
         self.members=[]
@@ -1193,14 +1487,24 @@ class RouteSetObject(RpslObject):
 
     @staticmethod
     def isRouteSet(rsid):
-        """ Returs True when the name appears to be route-set name (=key)
-        according to RPSL specs. """
+        """
+        :returns: True when the name appears to be route-set name (=key) \
+        according to RPSL specs.
+        """
         return str(rsid).find('RS-') > -1
 
     def getKey(self):
+        """
+        :returns: Key of the FilterSet object.
+        """
+        
         return self.route_set
 
     def __str__(self):
+        """
+        :returns: Text representation of the object.
+        """
+        
         return 'RouteSetbject: %s -< %s + %s'%(self.route_set, str(self.members), str(self.mp_members))
 
 
@@ -1213,6 +1517,12 @@ class HashObjectDir(object):
     to index them.
     """
     def __init__(self, filename, objType):
+        """ Init the HashObjectDir from file
+        
+        :param str filename: File to read
+        :param objType: Object type what to construct as a hash directory member
+        """
+        
         self.table={}
         for o in RpslObject.parseRipeFile(filename, objType):
             self.table[o.getKey()]=o
@@ -1225,30 +1535,65 @@ class HashObjectDir(object):
 # File handling
 
 def ripe_route_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_ROUTE_PICKLE
 
 def ripe_route6_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_ROUTE6_PICKLE
 
 def ripe_autnum_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_AUTNUM_PICKLE
 
 def ripe_asset_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_ASSET_PICKLE
 
 def ripe_filterset_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_FILTERSET_PICKLE
 
 def ripe_routeset_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_ROUTESET_PICKLE
 
 def ripe_peeringset_pickle(day):
+    """ Construct file name
+
+    :param day: Day obj
+    :returns: string, pickle file name corresponding to the day
+    """
     return common.resultdir(day)+RIPE_DB_PEERINGSET_PICKLE
 
 def decode_ripe_tgz_filename(filename):
     """
-    Input filename='ripedb-2014-2-16-1-17-2.txt.bz2'
-    Output (ipv6,year,month,day,hour,min,sec)
+    :param str filename: i.e. 'ripedb-2014-2-16-1-17-2.txt.bz2'
+    :returns: tuple (ipv6,year,month,day,hour,min,sec)
     """
 
     basename=os.path.basename(filename)
@@ -1265,10 +1610,13 @@ def decode_ripe_tgz_filename(filename):
 # Route checking code
 
 def check_ripe_route(path_vector, iana_dir, ripe_routes):
-    """
-    Do the actual checking of a route. Returns vector
-    (prefix, as-path, routeObj or None, status) and
-    status might be 0=OK, 1=aggregate, 2=missing origin, 3=not match,
+    """ Do the actual checking of a route.
+
+    :param path_vector: tuple, Path vector to match
+    :param IanaDirectory iana_dir:
+    :param HashObjectDir ripe_routes: HashObjectDir containing RouteObjects
+    :returns: vector (prefix, as-path, routeObj or None, status) and \
+    status might be 0=OK, 1=aggregate, 2=missing origin, 3=not match, \
     4=not found, 5=non-RIPE NCC.
     """
 
@@ -1316,18 +1664,21 @@ def check_ripe_route(path_vector, iana_dir, ripe_routes):
 
 
 def check_ripe_routes(day, ianadir, host, ipv6=False, bestonly=True):
-    """
-    Check routes from BGP dump against RIPE route objects. Ignore all routes
+    """ Check routes from BGP dump against RIPE route objects. Ignore all routes
     from the BGP dump that are either from outside of the RIPE region or
     does not contain enough information to check their origin. The most
     common reason for that is that routes are originated locally or that
     there has been aggregation that (naturally) stands on the beginning of
     the AS path.
 
-    Returns list of (prefix, as-path, routeObj or None, status) and
-    status might be 0=OK, 1=aggregate, 2=missing origin, 3=not match,
+    :param day: Day obj specifying the day to process
+    :param IanaDirectory ianadir:
+    :param str host: Host name to take BGP feed from
+    :param bool ipv6: IPv6 flag
+    :param bool bestonly: Process only the best routes
+    :returns: list of (prefix, as-path, routeObj or None, status) and \
+    status might be 0=OK, 1=aggregate, 2=missing origin, 3=not match, \
     4=not found, 5=non-RIPE NCC
-    
     """
     common.d("Checking RIPE routes against route objects for day", day)
 
@@ -1352,11 +1703,21 @@ RIPE_ROUTES_MATCH_LEGEND=['OK', 'no-search aggregate', 'origin missing', 'AS not
                           'route obj not found', 'non-ripe']
 
 def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
-    """
-    Generate text report for a day and return stats for further graphing.
+    """ Generate text report for a day and return stats for further graphing.
 
-    Returns list of tuples for graphing (day, total_ok, total_aggregate,
-    total_missing, total_notmatch, total_notfound, total_nonripe, total)
+    :param route_list: list of tuples (prefix, as-path, routeObj or None, status)
+    :param Day day: Day obj specifying the day to process
+    :param str outdir: Directory path
+    :param bool ipv6: IPv6 flag
+    :returns: tuple, Summary of the report
+
+    status in the route_list tuple:
+      * 0=OK
+      * 1=aggregate
+      * 2=missing origin
+      * 3=not match,
+      * 4=not found
+      * 5=non-RIPE NCC
     """
 
     total_ok=0
@@ -1414,7 +1775,15 @@ def report_ripe_routes_day(route_list, day, outdir, ipv6=False):
 
 ########## UNUSED - Not memory-effective ##########
 def ripe_gen_route_timeline(violators, days, ipv6=False):
-    """ Generate timeline for each suspect route. """
+    """ Generate timeline for each suspect route.
+
+    !!! UNUSED !!!
+
+    :param violators: list of routes
+    :param days: list of Day objects
+    :param bool ipv6: IPv6 flag
+    :returns: list containing violation timeline
+    """
 
     timeline={}
 
@@ -1440,7 +1809,11 @@ def ripe_gen_route_timeline(violators, days, ipv6=False):
     return timeline
 
 def report_route_timeline(timeline, ipv6=False):
-    """ Generate textual report on prefixes that has or had problems. """
+    """ Generate textual report on prefixes that has or had problems.
+
+    :param timeline: Data to report
+    :param bool ipv6: IPv6 flag
+    """
 
     txtout=common.resultdir()+(RIPE_ROUTE6_VIOLATION_TIMELINE if ipv6 else RIPE_ROUTE_VIOLATION_TIMELINE)
     common.d('Writing timeline to:', txtout)
@@ -1461,11 +1834,20 @@ def report_route_timeline(timeline, ipv6=False):
             tf.write('\n--------------------------------------------------\n\n')
 ########## END OF UNUSED - Not memory-effective ##########
 
-
 def ripe_gen_route_timeline_files(violators, days, ipv6=False):
-    """ Generate timeline for each suspect route into it's own file. """
+    """ Generate timeline for each suspect route into it's own file.
+
+    :param violators: list of routes
+    :param days: list of Day objects
+    :param bool ipv6: IPv6 flag
+    :returns: list containing violation timeline
+    """
 
     def gen_filename(ipaddr):
+        """
+        :param ipaddr: Prefix to generate filename for
+        :returns: Filename of the timeline for the specific prefix.
+        """
         return str(ipaddr).replace('/','-')
 
     def append_timeline_record(r, ipv6):
@@ -1535,6 +1917,11 @@ def ripe_gen_route_timeline_files(violators, days, ipv6=False):
 # Path checking code
 
 def normalize_aspath(text):
+    """ Internal fuction.
+
+    :param str text: AS path in text form
+    :returns: list of ASNs in AS path.
+    """
     text = text.replace('{', '').replace('}', '')
     asns = text.split()[:-1] # remove i or e or ? in the end of the string (= which means on
     # the beginning of the AS path)
@@ -1543,8 +1930,7 @@ def normalize_aspath(text):
 
 def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
                          autnum_dir, asset_dir, routeset_dir, fltrset_dir, prngset_dir, ipv6=False):
-    """
-    Check one step in as-path from BGP by means of resolving proper aut-num
+    """ Check one step in as-path from BGP by means of resolving proper aut-num
     object for the asn and check filters based on prefix that is being checked
     and current_aspath.
 
@@ -1566,15 +1952,27 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
     filters in the left-most AS are checked as well. (But the observer's AS filters are not
     checked anyway.)
 
-    Returns:
-    0 = step match (=OK)
-    1 = subject expansion failed (=recursion trhough as-set failed)
-    2 = ASN not in RIPE region (=not found in aut-num directory)
-    20 = filter reported DUNNO (=too complex filter to know/parse)
-    300-399 = import match filter failure
-    300 = can not find matching rule, otherwise subtract 300 and see matchFilter()
-    400-499 = export match filter failure
-    400 = can not find matchin rule, otherwise subtract 400 and see matchFilter()
+    :param pfx: Prefix to match
+    :param asn: ASN of the current AS from which point of view we are matching
+    :param current_aspath: AS path in the observing ASN
+    :param previous_as: Previous ASN in AS path
+    :param next_as: Next ASN in AS path
+    :param HashObjectDir autnum_dir: HashObjectDir with AutNum objs.
+    :param HashObjectDir asset_dir: HashObjectDir with AsSet objs.
+    :param HashObjectDir routeset_dir: HashObjectDir with RouteSet objs.
+    :param HashObjectDir fltrset_dir: HashObjectDir with FltrSet objs.
+    :param HashObjectDir prngset_dir: HashObjectDir with PeeringSet objs.
+    :returns: Status code
+
+    Status codes:
+      * 0 = step match (=OK)
+      * 1 = subject expansion failed (=recursion trhough as-set failed)
+      * 2 = ASN not in RIPE region (=not found in aut-num directory)
+      * 20 = filter reported DUNNO (=too complex filter to know/parse)
+      * 300-399 = import match filter failure
+      * 300 = can not find matching rule, otherwise subtract 300 and see matchFilter()
+      * 400-499 = export match filter failure
+      * 400 = can not find matchin rule, otherwise subtract 400 and see matchFilter()
     """
 
     #common.d('Checking path for', pfx, 'step from', previous_as, 'to', next_as, 'via', asn)
@@ -1659,8 +2057,7 @@ def check_ripe_path_step(pfx, asn, current_aspath, previous_as, next_as,
 
 def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_dir,
                     prngset_dir, ipv6=False, myas=None):
-    """
-    Chech path in path vector by means of resolving all aut-num
+    """ Chech path in path vector by means of resolving all aut-num
     object and filters along the as-path in the path_vector from BGP.
 
     Walk trhough as-path and call check_path_step for each ASN in as-path
@@ -1668,6 +2065,17 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
     as-path slice that represents what should be seen by the checked ASN.
 
     See check_ripe_path_step() for details.
+
+    :param path_vector: Path vector to match
+    :param HashObjectDir autnum_dir: HashObjectDir with AutNum objs.
+    :param HashObjectDir asset_dir: HashObjectDir with AsSet objs.
+    :param HashObjectDir routeset_dir: HashObjectDir with RouteSet objs.
+    :param HashObjectDir fltrset_dir: HashObjectDir with FltrSet objs.
+    :param HashObjectDir prngset_dir: HashObjectDir with PeeringSet objs.
+    :param bool ipv6: IPv6 flag
+    :param myas: ASN of the observation point
+    :returns: (path_vector, allinripe, status), path_vector is a tuple, allinripe is bool, \
+    status is int
     """
     
     # assert...
@@ -1705,24 +2113,31 @@ def check_ripe_path(path_vector, autnum_dir, asset_dir, routeset_dir, filterset_
 
 
 def check_ripe_paths(day, ianadir, host, ipv6=False, bestonly=True, myas=None, pfx_with_matching_route=None):
-    """
-    Check paths during their travel in the RIPE region.
-    Returns (path_vector, whole_path_in_ripe, status, status_per_as) where
-    path_vector is BGP path vector from checked host table for the day,
-    whole_path_in_ripe indicates whether whole path is withing
-    RIPE region (= no AS in as-path lays outside of RIPE),
-    ...
+    """ Check paths during their travel in the RIPE region.
+
+    :param day: Day to match
+    :param ianadir: IanaDirectory obj.
+    :param host: Host to take BGP feed from
+    :param bool ipv6: IPv6 flag
+    :param bool bestonly: Match only the best routes
+    :param myas: ASN of the observation point
+    :param pfx_with_matching_route: List of prefixes with matching routes
+    :returns: Iterator that returns (path_vector, whole_path_in_ripe, status, status_per_as) \
+    where path_vector is BGP path vector from checked host table for the day, \
+    whole_path_in_ripe indicates whether whole path is withing \
+    RIPE region (= no AS in as-path lays outside of RIPE), \
+    ... \
     status_per_as = list of check result statuses for each AS in as-path
 
-    status list:
-    0 = match (=OK)
-    -1 = route obj failed, do not check path
-    1 = route uncheckable (local or aggregate... =uncheckable)
-    2 = ASN outside of RIPE NCC region (=uncheckable)
-    300-399 = prevASN not found or prevASN filter failed
-    400-499 = nextASN not found or nextASN filter failed  (might be suppressed
-    by the status=3xx which has precedecnce but the AS should not export
-    prefix that it didnt imported in documented way...)
+    Status list:
+      * 0 = match (=OK)
+      * -1 = route obj failed, do not check path
+      * 1 = route uncheckable (local or aggregate... =uncheckable)
+      * 2 = ASN outside of RIPE NCC region (=uncheckable)
+      * 300-399 = prevASN not found or prevASN filter failed
+      * 400-499 = nextASN not found or nextASN filter failed  (might be suppressed \
+        by the status=3xx which has precedecnce but the AS should not export \
+        prefix that it didnt imported in documented way...)
     """
     # Plan:
     # load BGP dump, aut-num, as-set and *-set pickles
@@ -1785,14 +2200,22 @@ RIPE_PATHS_MATCH_LEGEND = ['Path verification OK', 'Uncheckable (non-RIPE/aggreg
 RIPE_PATHS_MATCH_DET_LEGEND = ['Hops OK', 'Hops UNKNOWN', 'Import NOT FOUND', 'Export NOT FOUND',
                                'Import fltr FAIL', 'Export fltr FAIL']
 def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
-    """
-    Generate meaningful report 
-    0 = match (=OK)
-    -1 = route object failed, do not check
-    1 = route uncheckable (local or aggregate... =uncheckable)
-    2 = ASN outside of RIPE NCC region (=uncheckable)
-    300-399 = prevASN not found or prevASN filter failed
-    400-499 = nextASN not found or nextASN filter failed  (might be suppressed)
+    """ Generate meaningful report of the check result.
+
+    :param check_res: Check result from the check_ripe_paths
+    :param Day day: Day to check and report
+    :param str outdir: Output directory name
+    :param bool ipv6: IPv6 flag
+    :returns: Tuple with detailed stats
+
+    States:
+      * 0 = match (=OK)
+      * -1 = route object failed, do not check
+      * 1 = route uncheckable (local or aggregate... =uncheckable)
+      * 2 = ASN outside of RIPE NCC region (=uncheckable)
+      * 300-399 = prevASN not found or prevASN filter failed
+      * 400-499 = nextASN not found or nextASN filter failed  (might be suppressed)
+
     ...
     See check_ripe_paths() for details.
     """
@@ -2014,10 +2437,11 @@ def report_ripe_paths_day(check_res, day, outdir, ipv6=False):
 
 
 def module_prepare_day(fn, d):
-    """
-    Prepare datastructures for RPS module for a day.
-    fn is a filename of the daily RIPE archive and d is a Day object
-    that represent the day.
+    """ Prepare datastructures for RPS module for a day.
+
+    :param str fn: Filename of the daily RIPE archive
+    :param Day d: Day object that represent the day to check and report
+    :raises Exception: When various I/O errors happen
     """
     
     # skip parsed days (enumerate all needed results in condition)
@@ -2127,10 +2551,10 @@ def module_prepare_day(fn, d):
 # Module interface
 
 def module_listdays(data_root_dir):
-    """
-    Enumerate days that the module can analyze.
+    """ Enumerate days that the module can analyze.
 
-    Returns generator of list of tuples (Day,filename).
+    :param str data_root_dir: Data directory to search for days
+    :returns: Iterator of list of tuples (Day,filename).
     """
     
     for fn in common.enumerate_files(data_root_dir+'/ripe','ripedb-[0-9-]+\.tar\.bz2'):
@@ -2139,15 +2563,16 @@ def module_listdays(data_root_dir):
 
 
 def module_preprocess(data_root_dir, thrnum=1):
-        """
-        Prepare datastructures for RPSL module.
+        """ Prepare datastructures for RPSL module.
         Run in multiple threads if thrnum allows it.
+
         Beware: The parser generates huge files in temp dir (~3G per parser)
         and consumes huge ammount of memory (at least 1G per parser). Therefore
         concurrent execution could run out of resources.
 
-        data_root_dir = directory with BGP as well as RIPE data
+        :param str data_root_dir: Directory with BGP as well as RIPE data \
         (/{<bgphost1>, <bgphost2>, ..., ripe})
+        :param int thrnum: Number of concurrent threads
         """
         
         def module_prepare_thread(tasks):
@@ -2178,12 +2603,16 @@ def module_preprocess(data_root_dir, thrnum=1):
 
 
 def module_process_day(day, ianadir, host, ipv6):
-    """
-    This function is executed from module_process in multiple threads.
+    """ This function is executed from module_process in multiple threads.
     This function executes check_ripe_routes() and check_ripe_paths()
     for the day in question and saves the results in proper pikcle files.
     Main function is creating the pickles eficiently - i.e. do not recreate
     already-existing results.
+
+    :param Day day: Day to process
+    :param IanaDirectory ianadir: Pre-loaded IanaDirectory object
+    :param str host: Host to take BGP feed from
+    :param bool ipv6: IPv6 flag
     """
 
     # Output filenames
@@ -2222,11 +2651,10 @@ def module_process_day(day, ianadir, host, ipv6):
 
 
 def module_process(days, ianadir, host, ipv6, thrnum=1):
-    """
-    Module main interface.
+    """ Module main interface.
 
     Plan:
-    Expecting that all result directories has been poppulated with
+    Expecting that all result directories has been populated with
     parsed sources from all BGP hosts as well as from RIPE data
     beacuse call to module_preprocess() has to come well before
     call of module_process.
@@ -2245,9 +2673,20 @@ def module_process(days, ianadir, host, ipv6, thrnum=1):
 
     Warning: The checking phase needs a lot of memory (~1-2G per thread).
     Running multiple instances concurrently might run out of resources.
+
+    :param days: List of Day objects
+    :param IanaDirectory ianadir: Pre-loaded IanaDirectory object
+    :param str host: Host to take BGP feed from
+    :param bool ipv6: IPv6 flag
+    :param int thrnum: Number of concurrent threads
     """
 
     def module_process_thread(tasks):
+        """ Thread main function
+
+        :param tasks: List of task tuples assigned to this thread
+        :raises Exception: When a threading error happen
+        """
         try:
             for t in tasks:
                 module_process_day(*t)
@@ -2281,13 +2720,17 @@ def module_process(days, ianadir, host, ipv6, thrnum=1):
 
     
 def module_postprocess(days, ianadir, host, ipv6):
-    """
-    Module main interface. Run postprocess (generate graphs and text outputs).
+    """ Module main interface. Run postprocess (generate graphs and text outputs).
 
     Plan:
-    Expecting that all result directories has been poppulated with
+    Expecting that all result directories has been populated with
     check results form module_process just load the results and count
     numbers for graphs and text outputs and write them.
+
+    :param days: List of Day objects
+    :param IanaDirectory ianadir: Pre-loaded IanaDirectory object
+    :param str host: Host to take BGP feed from
+    :param bool ipv6: IPv6 flag
     """
 
     route_totals=[]
@@ -2368,6 +2811,8 @@ def module_postprocess(days, ianadir, host, ipv6):
 # Unit test interface
 
 def main():
+    """ Unit testing main function. Do not use.
+    """
 #    raise Exception("This test does not work unless special environment is set.")
 
     testdir='/home/brill/ext/ripe-2015-06-21'
@@ -2379,6 +2824,60 @@ def main():
     routeset_testfile=testdir+RIPE_DB_ROUTESET
     peeringset_testfile=testdir+RIPE_DB_PEERINGSET
 
+
+    def measure_depth():
+        asset_dir=HashObjectDir(asset_testfile, AsSetObject)
+        prngset_dir=HashObjectDir(peeringset_testfile, PeeringSetObject)
+
+        print "as-set depth"
+        asset_depth=0
+        asset_sum=0
+        asset_n=0
+        for k in asset_dir.table.keys():
+            d = asset_dir.table[k].measureDepth(asset_dir)
+            if d>1:
+                asset_sum+=d
+                asset_n+=1
+#            print d
+            if d > asset_depth:
+                asset_depth = d
+
+        print "--------------------------"
+        print "Avg depth: %f" % (float(asset_sum)/asset_n)
+        print "Maximum depth: %d" % asset_depth
+
+        print "as-set subtree size"
+        asset_size=0
+        asset_ssum=0
+        asset_sn=0
+        for k in asset_dir.table.keys():
+            s = asset_dir.table[k].measureSubtreeSize(asset_dir)
+            if s>1:
+                asset_ssum+=s
+                asset_sn+=1
+#            print d
+            if s > asset_size:
+                asset_size = s
+
+        print "--------------------------"
+        print "Avg size: %f" % (float(asset_ssum)/asset_sn)
+        print "Maximum size: %d" % asset_size
+
+        print "prng-set depth"
+        prngset_depth=0
+        prngset_sum=0
+        for k in prngset_dir.table.keys():
+            d = prngset_dir.table[k].measureDepth(prngset_dir)
+            prngset_sum+=d
+#            print d
+            if d > prngset_depth:
+                prngset_depth = d
+
+        print "--------------------------"
+        print "Avg depth: %f" % (float(prngset_sum)/len(prngset_dir.table.keys()))
+        print "Maximum depth: %d" % prngset_depth
+
+        
 
     def test_routes():
         ripeRoutes=RouteObjectDir(route_testfile, False)
@@ -2477,8 +2976,9 @@ def main():
                            routeset_dir, prngset_dir, False)
         print str(r)+" matching... should be 0: "+str(res)
         
-    
 
+
+    measure_depth()
 #    test_routes()
 #    test_autnums()
 #    test_assets()
@@ -2486,7 +2986,8 @@ def main():
 #    test_routesets()
 #    test_peeringsets()
 #    test_autnum()
-    test_filters()
+#    test_filters()
+
 
 
 if __name__ == '__main__':

@@ -46,7 +46,11 @@ BIN_RM='/bin/rm'
 # Exported functions
 
 def d(m,*args):
-    """ Print debug message. d('fnc_x dbg x=',1,'y=',2) """
+    """ Print debug message. i.e. d('fnc_x dbg x=',1,'y=',2)
+    
+    :param str m: Text message
+    :param args: Additional stringifiable parts of the message.
+    """
 
     if DEBUG:
         for a in args:
@@ -54,7 +58,12 @@ def d(m,*args):
         sys.stderr.write(m+"\n")
 
 def w(m,*args):
-    """ Print warning message. d('fnc_x dbg x=',1,'y=',2) """
+    """ Print warning message. i.e w('fnc_x dbg x=',1,'y=',2)
+    
+    :param str m: Text message
+    :param args: Additional stringifiable parts of the message.
+    """
+
     for a in args:
         m += ' '+str(a)
     sys.stderr.write(m+"\n")
@@ -64,9 +73,11 @@ def w(m,*args):
 # Filename utils
     
 def enumerate_files(dir,pattern):
-    """
-    Enumerate files in a directory that matches the pattern.
-    Returns iterator that returns filenames with full path.
+    """ Enumerate files in a directory that matches the pattern.
+    
+    :param str dir: Directory path
+    :param str pattern: Pattern to match in enumeration
+    :returns: Iterator that returns filenames with full path.
     """
 
     regex = re.compile(pattern)
@@ -76,6 +87,10 @@ def enumerate_files(dir,pattern):
                         
 
 def checkcreatedir(dir):
+    """ Create dir if it does not exist.
+
+    :param str dir: Dir name to create.
+    """
     if not (os.path.exists(dir) and os.path.isdir(dir)):
         os.mkdir(dir)
 
@@ -89,7 +104,10 @@ def checkcreatedir(dir):
 _glob_result_dir=None
 
 def module_init(result_dir):
-    """ Initialize module paths etc. """
+    """ Initialize module paths etc.
+    
+    :param str result_dir: Set the global result directory
+    """
 
     global _glob_result_dir
     
@@ -99,6 +117,9 @@ def module_init(result_dir):
 def resultdir(day=None):
     """ Get Day object and return (existing) result directory name for the day.
     If no day is given, than return the root result dir.
+
+    :param Day day: Day obj or None
+    :returns: Path to the result directory
     """
 
     global _glob_result_dir
@@ -119,7 +140,11 @@ def resultdir(day=None):
 def normalize_ipv4_prefix(pfx):
     """ Take Cisco/IANA prefix, which might be trimmed (= 192.168.1/24) or
     without mask on classful boundary (192.168.1.0) and produce
-    correct prefix. """
+    correct prefix.
+
+    :param str pfx: Prefix in the text form
+    :returns: Normalized prefix in text form
+    """
 
     
     def normalize_addr(addr):
@@ -163,7 +188,11 @@ def normalize_ipv4_prefix(pfx):
 
 def unpack_ripe_file(filename):
     """ Decompress .tar.bz2 file that contains RIPE DB tree into a temp dir.
-    Return temp dir name. """
+    Return temp dir name.
+
+    :param str filename: Filename of the archive to decompress
+    :returns: Reulting dir path
+    """
     
     TMPDIR_PREFIX='bgpcrunch'
     
@@ -176,6 +205,11 @@ def unpack_ripe_file(filename):
 
 
 def cleanup_path(path):
+    """ Delete the specified subtree
+
+    :param str path: Path to call rm -rf on
+    """
+    
     d('Cleaning up path '+path)
     os.system(BIN_RM+' -rf '+path)
 
@@ -184,6 +218,9 @@ def cleanup_path(path):
 def load_pickle(filename):
     """
     Load an object form the pickle file.
+
+    :param str filename: What to load
+    :returns: Loaded object
     """
 
     o=None
@@ -195,8 +232,11 @@ def load_pickle(filename):
 
 
 def save_pickle(obj, outfile):
-    """
-    Save an object to a pickle file.
+    """ Save an object to a pickle file.
+
+    :param obj: Obj to save
+    :param str outfile: File to save obj to
+    :returns: The saved object
     """
     
     d("Saving pickle file", outfile)
@@ -207,9 +247,12 @@ def save_pickle(obj, outfile):
 
 
 def intersect(l1, l2):
-    """
-    Intersect two lists (this should be used for intersecting
+    """ Intersect two lists (this should be used for intersecting
     lists of Day objects.)
+
+    :param l1: List 1
+    :param l2: List 2
+    :returns: Iterator returning the intersection
     """
     
     for i in l1:
@@ -221,11 +264,22 @@ def intersect(l1, l2):
 
 
 class Day(object):
+    """ Day representation in compact form. The
+    object basically contains only the date but it can be converted
+    to different formats that are being used in the file names.
+    """
+
     def __init__(self,time_tuple=None):
+        """
+        :param time_tuple: (year, month, day)
+        """
         if time_tuple:
             self.setTime(time_tuple)
 
     def setTime(self,time_tuple):
+        """
+        :param time_tuple: (year, month, day)
+        """
         if len(time_tuple) != 3:
             raise Exception("time_tuple must contain (year,month,day)")
         try:
@@ -238,19 +292,29 @@ class Day(object):
         self.time = time_tuple
 
     def __str__(self):
+        """
+        :returns: year-month-day string
+        """
         return ("%04d" % self.time[0])+'-'+("%02d" % self.time[1])+'-'+("%02d" % self.time[2])
 
     def __repr__(self):
+        """
+        :returns: year-month-day string
+        """
         return self.__str__()
 
     def __cmp__(self,other):
+        """ Compare days (older<newer)
+        :param other: The other Day obj do compare
+        :returns: -1, 0 or 1 (cmp)
+        """
         assert isinstance(other, Day)
         return cmp(self.time, other.time)
 
 
 class _IPLookupTreeNode(object):
     """ Internal Node for the IPLookupTree. Should not be
-    even public unless cPickle needs it. How unfortunate. """
+    even public unless cPickle needs it. How unfortunate... """
     def __init__(self):
         self.one=None # _IPLookupTreeNode or None
         self.zero=None # _IPLookupTreeNode or None
@@ -258,11 +322,19 @@ class _IPLookupTreeNode(object):
         self.data=None # cave pickle
     
 class IPLookupTree(object):
+    """ Lookup tree for holding list of IP (IPv4/IPv6) prefixes. """
     def __init__(self,ipv6=False):
+        """
+        :param bool ipv6: IPv6 flag
+        """
         self.ipv6=ipv6
         self.root=_IPLookupTreeNode()
 
     def _bits(self,chararray):
+        """ Convert 8-bit chars to list of bools (bits)
+        :param chararray: 8-bit chars
+        :returns: Iterator that yields bits
+        """
         for c in chararray:
             ct=ord(c)
             for i in range(7,-1,-1):
@@ -272,6 +344,11 @@ class IPLookupTree(object):
                     yield False
 
     def add(self,net,data):
+        """ Add node to the tree.
+
+        :param net: IPv4/6 prefix
+        :param data: Bound data (arbitrary) object
+        """
         if not (isinstance(net, ipaddr.IPv4Network) or isinstance(net, ipaddr.IPv6Network)):
             net = ipaddr.IPNetwork(net)
 
@@ -291,6 +368,14 @@ class IPLookupTree(object):
 
 
     def _lookupAllLevelsNode(self, ip, maxMatches=0):
+        """ Internal match helper.
+
+        :param ip: IPv4/6 to match
+        :param int maxMatches: Maximum matches in the return list, i.e. stop when we \
+        have #maxMatches matches and ignore more specifices. 0=Unlimited
+        :returns: List of resulting match candidate objects.
+        """
+
         if not (isinstance(ip, ipaddr.IPv4Network) or isinstance(ip, ipaddr.IPv6Network) or
                 isinstance(ip, ipaddr.IPv4Address) or isinstance(ip, ipaddr.IPv6Address)):
             if str(ip).find('/') > 0:
@@ -334,8 +419,10 @@ class IPLookupTree(object):
         list. The first is the least specific match and the last is the most
         specific one.
 
-        maxMatches (int) = maximum matchech in the return list, i.e. stop when we
+        :param ip: IPv4/6 to match
+        :param int maxMatches: Maximum matches in the return list, i.e. stop when we \
         have #maxMatches matches and ignore more specifices. 0=Unlimited
+        :returns: List of resulting data in matching nodes.
         """
         return [n.data for n in self._lookupAllLevelsNode(ip, maxMatches)]
 
@@ -343,6 +430,9 @@ class IPLookupTree(object):
         """ Lookup in the tree. Find the first match (i.e. an object that
         has some network set in a tree node and the network contains the
         IP/Network that is being matched.)
+
+        :param ip: IPv4/6 to match
+        :returns: Resulting data in first matching node.
         """
 
         result = self.lookupAllLevels(ip, 1)
@@ -357,6 +447,9 @@ class IPLookupTree(object):
         has some network set in a tree node and the network contains the
         IP/Network that is being matched.) It is pretty much the same the routing
         mechanisms are doing.
+
+        :param ip: IPv4/6 to match
+        :returns: Resulting data in best matching node.
         """
         
         result = self.lookupAllLevels(ip)
@@ -370,13 +463,22 @@ class IPLookupTree(object):
         has some network set in a tree node and the network contains the
         IP/Network that is being matched.) It is pretty much the same the routing
         mechanisms are doing.
+
+        :param net: IPv4/6 prefix to match
+        :returns: Resulting data in exact matching node.
         """
 
         results = self._lookupAllLevelsNode(net)
         return [r.data for r in results if ipaddr.IPNetwork(r.end).prefixlen == ipaddr.IPNetwork(net).prefixlen]
 
     def dump(self):
+        """ Dump the tree. """
+        
         def printSubtree(node):
+            """ Print subtree of the IPLookupTree.
+            :param node: Root to print (recursively)
+            """
+
             if not node:
                 return
             

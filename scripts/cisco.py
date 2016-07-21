@@ -25,7 +25,11 @@ import common
 
 
 def _get_text_fh(filename):
-    """ Open gzip/bz2 and uncompressed files seamlessly based on suffix. """
+    """ Open gzip/bz2 and uncompressed files seamlessly based on suffix.
+    
+    :param str filename: File name to process
+    :returns: Open file descriptor that can be directly read
+    """
     
     def unbz2(filename):
         import bz2
@@ -44,11 +48,11 @@ def _get_text_fh(filename):
 
 
 def parse_cisco_bgp_file(filename=None,ipv6=False):
-    """
-    Read Cisco show ip bgp output captured in a file (specified by
+    """ Read Cisco show ip bgp output captured in a file (specified by
     the filename) and returns tuples (indicator,pfx,nexthop,aspath).
-    filename - string
-    Returns generator that generates [(indicator,pfx,nexthop,aspath),...]
+    
+    :param str filename: string - The file name to parse.
+    :returns: Iterator that generates [(indicator,pfx,nexthop,aspath),...]
     """
     
     HEADER_REGEX=re.compile('^.+ (Next Hop) .+ (Path).*$')
@@ -110,9 +114,10 @@ def gen_bgpdump_pickle(infile,outfile,ipv6=False):
     and generate outfile (pickle that contains list of tuples
     that parse_cisco_bgp_file returns).
 
-    infile: in filename (prefferably full path to the BGP text file)
-    outfile: out filename
-    ipv6: IPv6 indicator (needed for prefix normalization)
+    :param str infile: Input filename (prefferably full path to the BGP text file)
+    :param str outfile: Output filename
+    :param bool ipv6: IPv6 indicator (needed for prefix normalization)
+    :returns: The parsed cisco bgp output either from pickle or from the primary source
     """
 
     if os.path.isfile(outfile):

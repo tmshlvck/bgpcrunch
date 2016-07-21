@@ -26,7 +26,14 @@ OUTPUT_SUFFIX='png'
 COMMON_HEADER=''
 
 def gen_2dplot(header,data,filepfx):
-    """ Low level function. Do not use."""
+    """ Low level function. Do not use directly.
+    Generate the output from header and data and run gnuplot binary.
+
+    :param str header: Header to put in the beginning of the gnuplot source
+    :param data: List of tuples to put into data part of the 
+    :param str filepfx: Prefix to use as the resulting file names (for both the source and \
+    the resulting image)
+    """
 
     if len(data)==0:
         raise Exception("Can not generate empty plot! Gnuplot will fail subsequently.")
@@ -46,10 +53,15 @@ def gen_2dplot(header,data,filepfx):
 
 def gen_lineplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',xrange=None,yrange=None):
     """ Generate one line plot.
-    data = i.e. [('2014-01-01',1),('2014-01-02',2),('2014-01-03',3)]
-    filepfx is the prefix (path) for resulting files.
+
+    :param data: i.e. [('2014-01-01',1),('2014-01-02',2),('2014-01-03',3)]
+    :param str filepfx: The prefix (path) for resulting files. \
     filepfx='/tmp/testgraph' -> /tmp/testgraph.gnu and /tmp/testgraph.png
-    ... TODO
+    :param str title: Title of the resulting graph
+    :param str xlabel: X axis label
+    :param str ylabel: Y axis label
+    :param str xrange: Tuple (from,to) or None
+    :param str yrange: Tuple (from,to) or None
     """
 
     
@@ -71,13 +83,17 @@ plot "-" using 1:2 with lines ls 1 title "''' + title + '''"
 
 def gen_multilineplot(data,filepfx,xlabel='Date',ylabel='y',legend=[],xrange=None,yrange=None):
     """ Generate multiple-line plot.
-    data = i.e. [('2014-01-01',1,2,3),('2014-01-02',2,3,4),('2014-01-03',3,4,5)]
-    filepfx is the prefix (path) for resulting files.
+
+    :param data: i.e. [('2014-01-01',1,2,3),('2014-01-02',2,3,4),('2014-01-03',3,4,5)]
+    :param str filepfx: The prefix (path) for resulting files. \
     filepfx='/tmp/testgraph' -> /tmp/testgraph.gnu and /tmp/testgraph.png
-    ... TODO
+    :param str title: Title of the resulting graph
+    :param str xlabel: X axis label
+    :param str ylabel: Y axis label
+    :param str xrange: Tuple (from,to) or None
+    :param str yrange: Tuple (from,to) or None
     """
 
-    
     HEADER=COMMON_HEADER+'''set term '''+OUTPUT_TERM+'''
 set output "''' + filepfx + '.'+OUTPUT_SUFFIX+'''"
 #set style line 1 lc rgb "#dd181f" lt 1 lw 2 pt 7 ps 1.5
@@ -107,17 +123,19 @@ plot'''
 
     return gen_2dplot(HEADER,data,filepfx)
 
-    
 
 def gen_3dplot(data,filepfx,title='Anonymous graph',xlabel='Date',ylabel='y',zlabel='z'):
     """ Generate 3D net plot.
-    TODO
-    filepfx is the prefix (path) for resulting files.
+
+    :param data: i.e. [('2014-01-01',1,2),('2014-01-02',2,3),('2014-01-03',3,4)]
+    :param filepfx: The prefix (path) for resulting files. \
     filepfx='/tmp/testgraph' -> /tmp/testgraph.gnu and /tmp/testgraph.png
-    ... TODO
+    :param str title: Title of the resulting graph
+    :param str xlabel: X axis label
+    :param str ylabel: Y axis label
+    :param str zlabel: Z axis label
     """
 
-    
     if len(data)==0 or len(data[0])!=3:
         raise Exception("Can not generate empty plot! Gnuplot will fail subsequently.")
     
@@ -168,6 +186,8 @@ def test():
     
 
 def main():
+    """ Unit test entry point. Do not use. """
+
     import sys
     if '-t' in sys.argv:
         test()

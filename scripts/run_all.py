@@ -45,7 +45,10 @@ RIPE_DATA=DATA_DIR+'/ripe'
 
 def get_available_days():
         """ List days we have all needed data for. Ask modules for that
-        and do intersection. """
+        and do intersection.
+
+        :returns: List of available days
+        """
         bgp4 = [d for d,fn in bgp.module_listdays(BGP_HOSTS, BGP_DATA, False)]
         bgp6 = [d for d,fn in bgp.module_listdays(BGP_HOSTS, BGP_DATA, True)]
         ripe = [d for d,fn in rpsl.module_listdays(DATA_DIR)]
@@ -59,6 +62,8 @@ def preprocess_data(threads=1):
         Preprocess data. Meaning: Read textual data and create proper Python datastructures
         and save them in form of pickles. This should not be much time consuming and it has
         to be done on the one place (at least the code counts on in to some extent).
+
+        :param int threads: Number of threads to run
         """
         
         # Prepare RPSL parsing products
@@ -78,6 +83,9 @@ def process_workpackage(days, threads=1):
         One level of concurency is achieved inside modules using multiprocessing (tuned for each
         module. Another is achieved by splitting workpackages and distributing them over
         different servers.
+
+        :param days: Days that forms the workpackage
+        :param int threads: Threads to run
         """
 
         for ipv6 in [False,True]:
@@ -93,7 +101,10 @@ def process_workpackage(days, threads=1):
 
 def postprocess_workpackage(days):
         """ Generate graphs and text outputs. This should not be that much time-consuming
-        and it is needs to run on one place and in single thread. Sorry... """
+        and it is needs to run on one place and in single thread. Sorry...
+
+        :param days: Days that form the workpackage
+        """
 
         for ipv6 in [False,True]:
                 ifn = (IANA_IPV6 if ipv6 else IANA_IPV4)
@@ -116,6 +127,11 @@ def postprocess_workpackage(days):
 DAY_MATCH=re.compile("^([0-9]+)-([0-9]+)-([0-9]+)$")
 
 def decode_day(text):
+        """ Decode day code 2015-05-01 and create Day object
+
+        :param str text: Text representation of the day
+        :returns: The commond.Day object representing the text
+        """
         m=DAY_MATCH.match(text)
         if m:
                 return common.Day((int(m.group(1)), int(m.group(2)), int(m.group(3))))
@@ -125,6 +141,9 @@ def read_days(filename):
         This function reads a file that contains string representation
         of Day objects each on one line and creates a list of corresponding
         objects.
+
+        :param str filename: Filename to read
+        :returns: Iterator that yields common.Day objects
         """
 
         with open(filename, 'r') as f:

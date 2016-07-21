@@ -36,8 +36,8 @@ def get_pfxlen(pfx):
     When the IPv4 prefix contains explicit netmask it just returns it. I.E. 1.2.3.4/24 -> 24
     Netmask is determined based on classful IPv4 split otherwise.
 
-    pfx: IP address as string.
-    returns: (Int) Netmask.
+    :param str pfx: IP address as string.
+    :returns: (Int) Netmask.
     """
     if pfx.strip() == '0.0.0.0':
         return 0
@@ -57,7 +57,11 @@ def get_pfxlen(pfx):
             raise Exception("Multicast or reserved address hit: "+pfx)
 
 def get_bgp_pathlen(p):
-    """ Return number of ASes in ASpath. """ 
+    """ Return number of ASes in AS-path.
+
+    :param str p: AS-path to parse
+    :returns: Integer = number of ASes in AS-path
+    """ 
     return (len(p.split(' '))-1)
 
 
@@ -69,9 +73,10 @@ def gen_buckets(bgpdump,ipv6=False,bestonly=False):
     r[16]=[x,y,z,...] ; x,y,z are ints. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
 
-    bgpdump - data structure of parsed show ip bgp dump
-    ipv6 - bool (=expect /128 masks)
-    bestonly - ignore received but not used routes
+    :param bgpdump: Data structure of parsed show ip bgp dump
+    :param bool ipv6: (=expect /128 masks)
+    :param bool bestonly: Ignore received but not used routes
+    :returns: List representing the buckets
     """
     
     buckets=[]
@@ -98,6 +103,9 @@ def gen_buckets(bgpdump,ipv6=False,bestonly=False):
 def avg_pathlen(bucket):
     """ Count avgpathlen for a bucket (=list of pathlens like
     ["1 2 3","1 2","1 2 3 4",...]
+
+    :param bucket: The list representing the bucket
+    :returns: Integer representing the avg path length
     """
 
     if len(bucket)>0:
@@ -107,10 +115,10 @@ def avg_pathlen(bucket):
 
 
 def format_buckets(buckets):
-    """
-    Returns textual representation of buckets.
-    buckets - list of ints.
-    Returns list of lines.
+    """ Generate textual representation of buckets.
+    
+    :param buckets: List of integers representing the buckets.
+    :returns: List of lines = the text representation.
     """
     
     tpfx=0
@@ -129,6 +137,10 @@ def format_buckets(buckets):
 
 def gen_pathlen_textfile(buckets,outfile,ipv6):
     """ Gen textfile from buckets of one day (=list 1..32 or 128 of lists of pathlenghts).
+
+    :param buckets: List representing the buckets
+    :param str outfile: File name to write
+    :param bool ipv6: IPv6 flag
     """
 
     common.d('gen_pathlen_textfile genering', outfile)
@@ -138,7 +150,12 @@ def gen_pathlen_textfile(buckets,outfile,ipv6):
 
          
 def gen_pathlen_graph(buckets,outfile,ipv6):
-    """ Generate graph from buckets of each day. Graph pathlengths (one point per day). """
+    """ Generate graph from buckets of each day. Graph pathlengths (one point per day).
+
+    :param buckets: List representing the buckets
+    :param str outfile: File name to write
+    :param bool ipv6: IPv6 flag
+    """
     
     common.d('gen_pathlen_graph genering', outfile)
     graph.gen_lineplot([((i+1),avg_pathlen(b)) for i,b in enumerate(buckets)],
@@ -150,7 +167,12 @@ def gen_pathlen_timegraphs(bucket_matrix, filenamepfx, ipv6=True):
     """ Generate graphs pathlen4-<number> when number is the length of the examined
     prefix. Graph contains average length of paths with the prefix length set by number.
     It also creates 3d graph pathlen4-3d with all prefix lenght in one dimension.
-    And finally, it creates pathlen4-avg which graphs average for all prefix lengths. """
+    And finally, it creates pathlen4-avg which graphs average for all prefix lengths.
+
+    :param bucket_matrix: Matrix representing the buckets
+    :param str filenamepfx: File name prefix to create files and write them
+    :param bool ipv6: IPv6 flag
+    """
     
     rng=32
     if ipv6:
@@ -202,6 +224,10 @@ def gen_prefixcount_timegraphs(bucket_matrix, filenamepfx, ipv6=False):
     """ Generate graphs pfxcount4-<number> that shows how many prefixes
     of the length <number> was in DFZ at the defined time. It also generates
     graph pfxcount-sum that shows all the prefixes regardless of prefix length.
+
+    :param bucket_matrix: Matrix representing the buckets
+    :param str filenamepfx: File name prefix to create files and write them
+    :param bool ipv6: IPv6 flag
     """
 
     rng=32
@@ -252,6 +278,11 @@ def create_path_matrix(host, days, ipv6=False):
     """ Generate matrix: [t:buckets,...] where buckets (r) contains
     r[16]=[x,y,z,...] ; x,y,z are ints. It means that there was
     prefixes with netmask /16. One with AS-path length x, another y, ...
+
+    :param str host: Host name to analyze
+    :param days: List of Day obj. to analyze
+    :param bool ipv6: IPv6 flag
+    :returns: Bucket matrix
     """
     bucket_matrix={}
 
@@ -273,7 +304,15 @@ def create_path_matrix(host, days, ipv6=False):
 # File handling
 
 def bgpdump_pickle(day,host,ipv6=False,check_exist=True):
-        """ Get Day object and return filename for the parsing result pickle. """
+        """ Get Day object and return filename for the parsing result pickle.
+
+        :param Day day: Day to find
+        :param bool ipv6: IPv6 flag
+        :param bool check_exist: if True check existence of the picke file and \
+        return None when the file does not exist. If false return the filename \
+        anyway.
+        :returns: Filename of the corresponding file
+        """
         
         fn = '%s/bgp%d-%s.pickle'%(common.resultdir(day), (6 if ipv6 else 4), host)
         if check_exist and not os.path.isfile(fn):
@@ -283,9 +322,10 @@ def bgpdump_pickle(day,host,ipv6=False,check_exist=True):
 
 
 def decode_bgp_filename(filename):
-    """
-    Input filename='bgp-ipv6-2014-2-16-1-17-2.txt.bz2'
-    Output (ipv6,year,month,day,hour,min,sec)
+    """ Decode BGP filename to tuple.
+
+    :param filename: string, i.e. 'bgp-ipv6-2014-2-16-1-17-2.txt.bz2'
+    :returns: tuple (ipv6,year,month,day,hour,min,sec)
     """
 
     ipv6=False
@@ -310,14 +350,13 @@ def decode_bgp_filename(filename):
 
 
 def module_listdays(bgp_hosts, bgp_data, ipv6=False):
-    """
-    Enumerate days that the module can analyze.
+    """ Enumerate days that the module can analyze.
 
-    bgp_hosts: list of hostnames
-    bgp_data: hash bgp_host -> source directory
-    ipv6: flag
+    :param bgp_hosts: list of hostnames
+    :param bgp_data: hash bgp_host -> source directory
+    :param bool ipv6: IPv6 flag
 
-    Returns generator of list of tuples (Day,filename).
+    :returns: Generator of list of tuples (Day,filename).
     """
 
     for host in bgp_hosts:
@@ -327,15 +366,14 @@ def module_listdays(bgp_hosts, bgp_data, ipv6=False):
 
 
 def module_preprocess(bgp_hosts, bgp_data, ipv6=False):
-        """
-        Runs Cisco parser and parse files from data like
+        """ Runs Cisco parser and parse files from data like
         data/marge/bgp-ipv4-2014-04-01-01-17-01.txt.bz2
         and creates
         results/2014-04-01/bgp4-marge.pickle
         Returns list of Time objects.
 
-        bgp_hosts: list of hostnames
-        bgp_data: hash bgp_host -> source directory
+        :param bgp_hosts: list of hostnames
+        :param bgp_data: hash bgp_host -> source directory
         """
 
         out_days = []
@@ -356,7 +394,13 @@ def module_preprocess(bgp_hosts, bgp_data, ipv6=False):
 
 
 def module_postprocess(host, days, ipv6=False):
-    """ Main function to be called from run_all. Returns nothing but generates a lot of result files. """
+    """ Main function to be called from run_all.
+    Returns nothing but generates a lot of result files.
+
+    :param hosts: list of hostnames
+    :param days: list of days
+    :param bool ipv6: IPv6 flag
+    """
     m=create_path_matrix(host, days, ipv6)
     gen_pathlen_timegraphs(m, common.resultdir(), ipv6)
     gen_prefixcount_timegraphs(m, common.resultdir(), ipv6)
@@ -373,6 +417,8 @@ def module_postprocess(host, days, ipv6=False):
 # Testing and command-line interface
 
 def main():
+    """ Run self-test. Do not use.
+    """
     def usage():
         print """bgp.py [-6] [-f filename] -- generate matrix from a captured
 Cisco show ip bgp or show ipv6 bgp

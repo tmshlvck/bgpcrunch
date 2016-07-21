@@ -32,7 +32,15 @@ RIRS=['LACNIC','APNIC','ARIN','RIPE NCC','AFRINIC']
 # Exported classes
 
 class IanaDirectory(object):
+        """ IANA directory object representation """
+        
         def __init__(self,listfile,ipv6):
+                """ Create the IANA directory from csv file.
+
+                :param str listfile: File to read
+                :param bool ipv6: IPv6 flag
+                """
+                
                 self.ipv6=ipv6
                 self.listfile=listfile
                 #self.table=list(self._read_iana_networks(self.ipv6))
@@ -42,6 +50,13 @@ class IanaDirectory(object):
 
 
         def _read_iana(self,ipv6):
+                """ Internal method. Do not use.
+                Read IANA csv file and return rows.
+
+                :param bool ipv6: IPv6 flag
+                :returns: Iterator that generates rows = tuples of strings.
+                """
+                
                 with open(self.listfile, 'rb') as csvfile:
                         reader = csv.reader(csvfile)
                         for row in reader:
@@ -50,6 +65,15 @@ class IanaDirectory(object):
 
 
         def _read_iana_networks(self,ipv6):
+                """ Internal method. Do not use.
+                Read IANA csv file and return parsed rows.
+
+                :param bool ipv6: IPv6 flag
+                :returns: Iterator that generates rows = tuples \
+                (ipaddr.IPNetwork, status, RIR ID), status might be ALLOCATED,\
+                LEGACY or RESERVED
+                """
+
                 def normalize_rir(name):
                         return name.replace('Administered by ','').strip()
 
@@ -64,9 +88,12 @@ class IanaDirectory(object):
 
                 
         def resolve_network(self,net):
-                """ Takes ipaddr.IPv[46]Network instance or string that can be used to construct it and
-                returns (IPv4Network() or IPv6Network object, status(str), RIRID(str))
-                i.e. (IPv6Network('2001:8000::/19'), 'ALLOCATED', 'APNIC') ."
+                """ Resolve  ipaddr.IPv[46]Network to the IANA tuple.
+
+                :param net: ipaddr.IPv[46]Network instance or string that can be used to\
+                construct it
+                :returns: (IPv4Network() or IPv6Network object, status(str), RIRID(str)) \
+                i.e. (IPv6Network('2001:8000::/19'), 'ALLOCATED', 'APNIC') .
                 """
                 
                 if not (isinstance(net, ipaddr.IPv4Network) or isinstance(net, ipaddr.IPv6Network)):
@@ -87,6 +114,12 @@ def module_process(ianadir, host, days, ipv6=False, bestonly=False):
         Match BGP prefixes in IANA's directory and generate text
         outputs and stats that determine average active prefix counts
         and average de-aggregation for each RIR.
+
+        :param IanaDirectory ianadir: IanaDirectory instance to match agains
+        :param str host: Host to take BGP feeds from
+        :param days: List of days to analyze
+        :param bool ipv6: IPv6 flag
+        :param bool bestonly: Take only best BGP paths into account
         """
 
         timeline=[]
@@ -141,6 +174,8 @@ def module_process(ianadir, host, days, ipv6=False, bestonly=False):
 # Module test interface
 
 def main():
+        """ Unit testing entry point. Do not use. """
+
         import sys
 
         if len(sys.argv) != 3:
